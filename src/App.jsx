@@ -628,7 +628,7 @@ export default function HISDocPortal() {
   };
 
   const ScreenModal = ({ initial, idx, onClose }) => {
-    const [f, setF] = useState(initial || { id: "s" + Date.now(), name: "", icon: "📄", description: "", reqIds: [], actors: [], actions: [], fields: [], behavior: [], apiEndpoints: [] });
+    const [f, setF] = useState(initial || { id: "s" + Date.now(), name: "", icon: "📄", description: "", reqIds: [], actors: [], actions: [], fields: [], behavior: [], apiEndpoints: [], status: "active" });
     const [reqText, setReqText] = useState((initial?.reqIds || []).join(", "));
     const [actorText, setActorText] = useState((initial?.actors || []).join(", "));
     const [actionText, setActionText] = useState((initial?.actions || []).join(", "));
@@ -636,9 +636,10 @@ export default function HISDocPortal() {
     const [groupText, setGroupText] = useState((initial?.fieldGroups || []).map(g => `${g.section}: ${g.fieldNames.join(", ")}`).join(""));
     return (
       <Modal title={initial ? "Edit Screen" : "Add Screen"} onClose={onClose} wide>
-        <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 120px", gap: 10 }}>
           <FormRow label="Icon"><Input value={f.icon} onChange={v => setF({ ...f, icon: v })} /></FormRow>
           <FormRow label="Screen Name"><Input value={f.name} onChange={v => setF({ ...f, name: v })} /></FormRow>
+          <FormRow label="Status"><Select value={f.status || "active"} onChange={v => setF({ ...f, status: v })} options={["active", "disabled"]} /></FormRow>
         </div>
         <FormRow label="Description"><Input area value={f.description} onChange={v => setF({ ...f, description: v })} /></FormRow>
         <FormRow label="Requirement IDs (comma-sep)"><Input value={reqText} onChange={setReqText} placeholder="FR-REG-001, FR-REG-002" /></FormRow>
@@ -660,22 +661,34 @@ export default function HISDocPortal() {
     );
   };
 
-  const FieldModal = ({ screenIdx, fieldIdx, initial, onClose }) => {
+  const FieldModal = ({ screenIdx, fieldIdx, initial, defaultGroup, onClose }) => {
     const tableNames = cols.map(c => c.name);
     const defaultTable = tableNames[0] || "MP_patients";
-    const [f, setF] = useState(initial || { name: "", label: "", type: "text", required: false, note: "", targetTable: defaultTable, group: "" });
+    const [f, setF] = useState(initial || { name: "", label: "", type: "text", required: false, note: "", targetTable: defaultTable, group: defaultGroup || "" });
+    const existingGroups = [...new Set((screens[screenIdx]?.fields || []).map(fld => fld.group).filter(Boolean))];
     return (
       <Modal title={initial ? "Edit Field" : "Add Field"} onClose={onClose}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <FormRow label="Field Name"><Input value={f.name} onChange={v => setF({ ...f, name: v })} placeholder="field_name" /></FormRow>
           <FormRow label="Label"><Input value={f.label} onChange={v => setF({ ...f, label: v })} /></FormRow>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
           <FormRow label="Type"><Select value={f.type} onChange={v => setF({ ...f, type: v })} options={["text","dropdown","date","datetime","number","tel","email","file","textarea","checkbox"]} /></FormRow>
           <FormRow label="Required"><Select value={f.required ? "Yes" : "No"} onChange={v => setF({ ...f, required: v === "Yes" })} options={["Yes","No"]} /></FormRow>
           <FormRow label="Target Table"><Select value={f.targetTable || defaultTable} onChange={v => setF({ ...f, targetTable: v })} options={tableNames.length ? tableNames : [defaultTable]} /></FormRow>
-          <FormRow label="Group"><Input value={f.group || ""} onChange={v => setF({ ...f, group: v })} placeholder="e.g. Demographics" /></FormRow>
         </div>
+        <FormRow label="Group">
+          <div>
+            <Input value={f.group || ""} onChange={v => setF({ ...f, group: v })} placeholder="Type a new group or pick one below…" />
+            {existingGroups.length > 0 && (
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 7 }}>
+                {existingGroups.map(g => (
+                  <button key={g} type="button" onClick={() => setF({ ...f, group: g })} style={{ padding: "3px 11px", borderRadius: 10, fontSize: 11, fontWeight: 600, border: `1px solid ${f.group === g ? P.purple : P.border}`, background: f.group === g ? P.purpleDim : "transparent", color: f.group === g ? P.purple : P.textMuted, cursor: "pointer" }}>{g}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        </FormRow>
         <FormRow label="Validation / Notes"><Input area value={f.note} onChange={v => setF({ ...f, note: v })} /></FormRow>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
           <Btn ghost onClick={onClose}>Cancel</Btn>
@@ -885,7 +898,7 @@ export default function HISDocPortal() {
                   ))}
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
-                  {screens.map((s,i) => <div key={i} onClick={() => { setActiveTab("screens"); setActiveIdx(i); }} style={{ background: P.surface, border: `1px solid ${P.border}`, borderRadius: 10, padding: "14px 18px", cursor: "pointer" }}><div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}><span style={{ fontSize: 16 }}>{s.icon}</span><span style={{ fontSize: 13, fontWeight: 700 }}>{s.name}</span></div><div style={{ fontSize: 11.5, color: P.textDim }}>{s.description}</div></div>)}
+                  {screens.map((s,i) => { const isDisabled = (s.status || "active") === "disabled"; return <div key={i} onClick={() => { setActiveTab("screens"); setActiveIdx(i); }} style={{ background: isDisabled ? P.redDim : P.surface, border: `1px solid ${isDisabled ? P.red+"55" : P.border}`, borderRadius: 10, padding: "14px 18px", cursor: "pointer", opacity: isDisabled ? 0.75 : 1 }}><div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}><span style={{ fontSize: 16 }}>{s.icon}</span><span style={{ fontSize: 13, fontWeight: 700 }}>{s.name}</span><span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 8, background: isDisabled ? P.red+"22" : P.greenDim, color: isDisabled ? P.red : P.green, textTransform: "uppercase" }}>{isDisabled ? "Disabled" : "Active"}</span></div><div style={{ fontSize: 11.5, color: P.textDim }}>{s.description}</div></div>; })}
                 </div>
                 {mod.compliance?.length > 0 && <div style={{ marginTop: 20, display: "flex", gap: 6, flexWrap: "wrap" }}>{mod.compliance.map((s,i) => <Badge key={i} text={s} color={P.green} />)}</div>}
               </>}
@@ -900,7 +913,10 @@ export default function HISDocPortal() {
                 <Btn onClick={() => setModal({ type: "addScreen" })} color={P.green}>+ Add Screen</Btn>
               </div>
               <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-                {screens.map((s,i) => <button key={i} onClick={() => { setActiveIdx(i); setPgFields(1); setPgBehavior(1); }} style={{ padding: "6px 12px", borderRadius: 6, border: `1px solid ${activeIdx===i?mod.color:P.border}`, background: activeIdx===i?mod.color+"18":"transparent", color: activeIdx===i?mod.color:P.textMuted, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{s.icon} {s.name}</button>)}
+                {screens.map((s,i) => {
+                  const isDisabled = (s.status || "active") === "disabled";
+                  return <button key={i} onClick={() => { setActiveIdx(i); setPgFields(1); setPgBehavior(1); }} style={{ padding: "6px 12px", borderRadius: 6, border: `1px solid ${activeIdx===i?mod.color:isDisabled?P.red+"66":P.border}`, background: activeIdx===i?mod.color+"18":isDisabled?P.redDim:"transparent", color: activeIdx===i?mod.color:isDisabled?P.red:P.textMuted, cursor: "pointer", fontSize: 12, fontWeight: 600, opacity: isDisabled ? 0.7 : 1 }}>{s.icon} {s.name}{isDisabled ? " ⊘" : ""}</button>;
+                })}
               </div>
               {screens[activeIdx] && (() => { const sc = screens[activeIdx]; const groups = sc.fieldGroups || []; const hasGroups = groups.length > 0;
                 const groupedFields = hasGroups ? groups.map(g => ({ section: g.section, fields: (sc.fields||[]).filter(f => g.fieldNames.includes(f.name)) })) : [{ section: null, fields: sc.fields || [] }];
@@ -913,8 +929,18 @@ export default function HISDocPortal() {
                   {/* Header */}
                   <div style={{ background: P.surface, border: `1px solid ${P.border}`, borderRadius: 10, padding: 20, marginBottom: 14 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <div><h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 4px" }}>{sc.icon} {sc.name}</h2><p style={{ color: P.textMuted, fontSize: 12.5, margin: 0 }}>{sc.description}</p></div>
-                      <div style={{ display: "flex", gap: 6 }}><Btn small ghost onClick={() => setModal({ type: "editScreen", screen: sc, idx: activeIdx })}>✎ Edit</Btn><Btn small danger ghost onClick={() => setConfirmDel({ what: sc.name, onConfirm: () => { deleteItem("screens", activeIdx); setActiveIdx(0); setConfirmDel(null); } })}>✕</Btn></div>
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                          <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>{sc.icon} {sc.name}</h2>
+                          <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: (sc.status || "active") === "active" ? P.greenDim : P.redDim, color: (sc.status || "active") === "active" ? P.green : P.red, textTransform: "uppercase", letterSpacing: "0.5px" }}>{(sc.status || "active") === "active" ? "Active" : "Disabled"}</span>
+                        </div>
+                        <p style={{ color: P.textMuted, fontSize: 12.5, margin: 0 }}>{sc.description}</p>
+                      </div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <Btn small ghost onClick={() => { const s2 = [...screens]; const toggled = { ...s2[activeIdx], status: (s2[activeIdx].status || "active") === "active" ? "disabled" : "active" }; s2[activeIdx] = toggled; save({ ...data, screens: { ...data.screens, [activeMod]: s2 } }); }} style={{ color: (sc.status || "active") === "active" ? P.red : P.green }}>{(sc.status || "active") === "active" ? "⊘ Disable" : "✓ Enable"}</Btn>
+                        <Btn small ghost onClick={() => setModal({ type: "editScreen", screen: sc, idx: activeIdx })}>✎ Edit</Btn>
+                        <Btn small danger ghost onClick={() => setConfirmDel({ what: sc.name, onConfirm: () => { deleteItem("screens", activeIdx); setActiveIdx(0); setConfirmDel(null); } })}>✕</Btn>
+                      </div>
                     </div>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>{sc.reqIds?.map(id => <Badge key={id} text={id} />)}</div>
                     <div style={{ fontSize: 12, color: P.textDim, marginTop: 8 }}><b>Actors:</b> {sc.actors?.join(", ")} · <b>Actions:</b> {sc.actions?.join(" · ")}</div>
@@ -937,7 +963,10 @@ export default function HISDocPortal() {
                           <div style={{ color: "#5BA7E6", fontWeight: 700, fontSize: 13 }}>{sc.name}:</div>
                           {Object.entries(grp).map(([gName, fields], gi) => (
                             <div key={gi}>
-                              <div style={{ color: "#80CBC4", fontWeight: 700, paddingLeft: 28 }}>{gName}:</div>
+                              <div style={{ display: "flex", alignItems: "center", paddingLeft: 28 }}>
+                                <span style={{ color: "#80CBC4", fontWeight: 700, flex: 1 }}>{gName}:</span>
+                                <button onClick={() => setModal({ type: "addField", screenIdx: activeIdx, defaultGroup: gName === "Ungrouped" ? "" : gName })} style={{ background: "none", border: "1px solid #80CBC455", color: "#80CBC4", cursor: "pointer", fontSize: 10, padding: "1px 8px", borderRadius: 4, opacity: 0.7, fontFamily: "inherit" }}>+ Add</button>
+                              </div>
                               {fields.map((f, fi) => (
                                 <div key={fi} style={{ display: "flex", alignItems: "center", paddingLeft: 56, color: "#E0E0E0" }}>
                                   <span style={{ minWidth: 180, whiteSpace: "nowrap" }}>{f.label || f.name}</span>
@@ -1212,7 +1241,7 @@ export default function HISDocPortal() {
       {modal?.type === "editReq" && <ReqModal initial={modal.req} idx={modal.idx} onClose={() => setModal(null)} />}
       {modal?.type === "addScreen" && <ScreenModal onClose={() => setModal(null)} />}
       {modal?.type === "editScreen" && <ScreenModal initial={modal.screen} idx={modal.idx} onClose={() => setModal(null)} />}
-      {modal?.type === "addField" && <FieldModal screenIdx={modal.screenIdx} onClose={() => setModal(null)} />}
+      {modal?.type === "addField" && <FieldModal screenIdx={modal.screenIdx} defaultGroup={modal.defaultGroup} onClose={() => setModal(null)} />}
       {modal?.type === "editField" && <FieldModal screenIdx={modal.screenIdx} fieldIdx={modal.fieldIdx} initial={modal.field} onClose={() => setModal(null)} />}
       {modal?.type === "addEndpoint" && <EndpointModal screenIdx={modal.screenIdx} onClose={() => setModal(null)} />}
       {modal?.type === "editEndpoint" && <EndpointModal screenIdx={modal.screenIdx} epIdx={modal.epIdx} initial={modal.ep} onClose={() => setModal(null)} />}
