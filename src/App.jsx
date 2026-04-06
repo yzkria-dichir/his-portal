@@ -401,7 +401,7 @@ export default function HISDocPortal() {
   const save = useCallback(async (newData) => {
     setData(newData);
     skipNextSync.current = true;
-    try { await saveData(newData); } catch (e) { console.error("Save failed:", e); }
+    try { await saveData(newData); } catch (e) { console.error("Save failed:", e); alert("⚠️ Save failed — changes not persisted.\n\n" + (e?.message || e)); }
   }, []);
 
   const resetAll = useCallback(async () => { await save(DEFAULT_DATA); setActiveMod("mp"); setActiveTab("overview"); }, [save]);
