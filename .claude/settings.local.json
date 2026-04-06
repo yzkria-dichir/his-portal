@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(xargs grep -l -i \"screen\")"
+      "Bash(xargs grep -l -i \"screen\")",
+      "Bash(git add src/App.jsx)",
+      "Bash(git commit -m \"show alert on save failure to surface Firestore errors\")",
+      "Bash(git push origin main)"
     ]
   }
 }
