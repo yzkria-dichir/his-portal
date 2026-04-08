@@ -609,28 +609,54 @@ export default function HISDocPortal() {
           return out;
         };
 
+        // Tables are derived per function (group), deduped across the whole module.
+        // Each generated field carries a `targetTable` that points at the right table.
+        const modPrefix = String(activeMod||"MOD").toUpperCase();
+        const tableNameOf = (funcName) => {
+          const base = String(funcName||"Data").replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"") || "Data";
+          return modPrefix + "_" + base;
+        };
+        const tblByFunc = {}; // funcName -> { name, description, fieldsByName: { [colName]: row } }
+        const tblOrder = [];
+        const addColumnToTable = (funcName, description, col) => {
+          if (!tblByFunc[funcName]) {
+            tblByFunc[funcName] = { name: tableNameOf(funcName), description: description || funcName, fieldsByName: {} };
+            tblOrder.push(funcName);
+          }
+          const t = tblByFunc[funcName];
+          if (!t.fieldsByName[col.field]) t.fieldsByName[col.field] = col;
+        };
+
         const ic = ["\uD83D\uDCCB","\uD83D\uDD0D","\u2699\uFE0F","\uD83D\uDCCA","\u26A1","\uD83D\uDC65","\uD83D\uDC76","\u2753","\uD83D\uDCDD","\uD83D\uDCC5"];
         const newScr = sOrder.map(n => sMap[n]).map((s,i) => {
           const seen = {};
           const fields = [];
-          const pushField = (label, type, required, note, group) => {
+          const pushField = (label, type, required, note, group, funcDesc) => {
             let name = slug(label);
             if (!name) return;
             if (seen[name]) { let k=2; while (seen[name+"_"+k]) k++; name = name+"_"+k; }
             seen[name] = true;
-            fields.push({ name, label, type, required, note: note || "", group: group || "General" });
+            const targetTable = tableNameOf(group);
+            fields.push({ name, label, type, required, note: note || "", group: group || "General", targetTable });
+            // Mirror this field as a column in the table for its function/group.
+            addColumnToTable(group, funcDesc || group, {
+              field: name,
+              type: inferSqlType(type),
+              desc: note || label,
+              constraints: required ? "NOT NULL" : "",
+            });
           };
           s.fns.forEach(f => {
             const groupName = f.n || "General";
             // Try to parse multiple fields out of the Business Rules / Notes column.
             const extracted = parseFieldsFromBR(f.b);
             if (extracted.length > 0) {
-              extracted.forEach(ef => pushField(ef.label, ef.type, ef.required, ef.note || f.d || "", groupName));
+              extracted.forEach(ef => pushField(ef.label, ef.type, ef.required, ef.note || "", groupName, f.d));
             } else {
               // Fallback: function row didn't describe individual fields → make one field from the function name.
               const label = f.n || (f.d ? f.d.split(".")[0] : "Field");
               const blob = (f.n||"")+" "+(f.d||"")+" "+(f.b||"");
-              pushField(label, inferUiType(blob), false, [f.d, f.b].filter(Boolean).join(" \u2014 "), groupName);
+              pushField(label, inferUiType(blob), false, [f.d, f.b].filter(Boolean).join(" \u2014 "), groupName, f.d);
             }
           });
           // Build fieldGroups from whatever groups actually appeared.
@@ -647,30 +673,21 @@ export default function HISDocPortal() {
           };
         });
 
-        // Generate one DB table per screen using its derived fields.
-        const modPrefix = String(activeMod||"MOD").toUpperCase();
-        const newTbls = newScr.map((s,i) => {
-          const tblBase = s.name.replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"") || ("Screen"+(i+1));
-          const tblName = modPrefix + "_" + tblBase;
+        // Materialize the per-function tables collected above.
+        const newTbls = tblOrder.map((fname, i) => {
+          const t = tblByFunc[fname];
           const tblFields = [
             { field: "id", type: "VARCHAR(36)", desc: "Primary key (UUID)", constraints: "PRIMARY KEY" },
+            ...Object.values(t.fieldsByName),
+            { field: "created_at", type: "TIMESTAMP", desc: "Record creation timestamp", constraints: "NOT NULL" },
+            { field: "created_by", type: "VARCHAR(64)", desc: "Created by user", constraints: "" },
+            { field: "updated_at", type: "TIMESTAMP", desc: "Last update timestamp", constraints: "" },
+            { field: "updated_by", type: "VARCHAR(64)", desc: "Last updated by user", constraints: "" },
           ];
-          s.fields.forEach(f => {
-            tblFields.push({
-              field: f.name,
-              type: inferSqlType(f.type),
-              desc: f.note || f.label,
-              constraints: f.required ? "NOT NULL" : "",
-            });
-          });
-          tblFields.push({ field: "created_at", type: "TIMESTAMP", desc: "Record creation timestamp", constraints: "NOT NULL" });
-          tblFields.push({ field: "created_by", type: "VARCHAR(64)", desc: "Created by user", constraints: "" });
-          tblFields.push({ field: "updated_at", type: "TIMESTAMP", desc: "Last update timestamp", constraints: "" });
-          tblFields.push({ field: "updated_by", type: "VARCHAR(64)", desc: "Last updated by user", constraints: "" });
           return {
             id: "c"+(i+1),
-            name: tblName,
-            description: s.description || (s.name + " data"),
+            name: t.name,
+            description: t.description,
             indices: ["id (unique)"],
             fields: tblFields,
           };
