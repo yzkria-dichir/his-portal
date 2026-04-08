@@ -510,29 +510,102 @@ export default function HISDocPortal() {
         const reqById = {};
         newReqs.forEach(r => { reqById[r.id] = r; });
 
+        // Parse one item like "First Name (mandatory, max 50)" -> field object, or null.
+        const parseFieldItem = (raw) => {
+          if (!raw) return null;
+          let item = String(raw).trim().replace(/^[-•*►→·\u2022\u25E6\u25AA\u25B8]+\s*/, "").trim();
+          if (!item) return null;
+          // Strip any leading list number like "1." or "1)"
+          item = item.replace(/^\d+[\.\)]\s*/, "");
+          // Pull parenthetical hints
+          let label = item, hints = "";
+          const m = item.match(/^(.*?)\s*\(([^)]*)\)\s*\.?$/);
+          if (m) { label = m[1].trim(); hints = m[2].trim(); }
+          // Strip trailing punctuation
+          label = label.replace(/[.;:]+$/, "").trim();
+          // Required markers
+          let required = false;
+          if (label.endsWith("*")) { required = true; label = label.slice(0,-1).trim(); }
+          if (/\b(required|mandatory)\b/i.test(hints) || /\b(required|mandatory)\b/i.test(label)) required = true;
+          label = label.replace(/\b(required|mandatory)\b/ig, "").trim();
+          if (!label) return null;
+          // Reject anything that looks like a sentence/rule, not a field name
+          if (label.length > 60) return null;
+          if (/\b(shall|must|should|validates?|displays?|allows?|ensures?|when|after|before|if\s)\b/i.test(label)) return null;
+          // Reject if label has no letters
+          if (!/[A-Za-z]/.test(label)) return null;
+          return {
+            label,
+            type: inferUiType(label + " " + hints),
+            required,
+            note: hints,
+          };
+        };
+        // Parse a Business Rules / Notes cell into multiple fields when it looks
+        // like a list of fields. Returns [] when the cell is a free-form rule sentence.
+        const parseFieldsFromBR = (text) => {
+          if (!text) return [];
+          let s = String(text).trim();
+          // Strip common leading prefixes
+          s = s.replace(/^(capture(?:s)?|fields?|collect(?:s)?|input(?:s)?|enter(?:s)?|include(?:s)?|the following fields?|with fields?)\s*[:\-]?\s*/i, "");
+          // Primary split: newlines or bullet markers
+          let parts = s.split(/[\n\r]+|\s*[•►→·\u2022\u25E6\u25AA\u25B8]\s+|(?:^|\s)[-*]\s+/).map(p => p.trim()).filter(Boolean);
+          // If only 1 part but it looks like a comma-separated short list, split it
+          if (parts.length === 1 && parts[0].includes(",")) {
+            const cs = parts[0].split(",").map(p => p.trim()).filter(Boolean);
+            if (cs.length >= 2) {
+              const avg = cs.reduce((a,b)=>a+b.length,0)/cs.length;
+              if (avg < 40) parts = cs;
+            }
+          }
+          const out = [];
+          parts.forEach(p => {
+            // If a single line still has many short comma items, expand it
+            if (p.includes(",") && !/\(.*,.*\)/.test(p)) {
+              const cs = p.split(",").map(x=>x.trim()).filter(Boolean);
+              const avg = cs.reduce((a,b)=>a+b.length,0)/cs.length;
+              if (cs.length >= 2 && avg < 40) {
+                cs.forEach(it => { const f = parseFieldItem(it); if (f) out.push(f); });
+                return;
+              }
+            }
+            const f = parseFieldItem(p);
+            if (f) out.push(f);
+          });
+          return out;
+        };
+
         const ic = ["\uD83D\uDCCB","\uD83D\uDD0D","\u2699\uFE0F","\uD83D\uDCCA","\u26A1","\uD83D\uDC65","\uD83D\uDC76","\u2753","\uD83D\uDCDD","\uD83D\uDCC5"];
         const newScr = sOrder.map(n => sMap[n]).map((s,i) => {
-          // Generate one field per function listed for this screen.
           const seen = {};
           const fields = [];
-          s.fns.forEach(f => {
-            const label = f.n || (f.d ? f.d.split(".")[0] : "Field");
+          const pushField = (label, type, required, note, group) => {
             let name = slug(label);
+            if (!name) return;
             if (seen[name]) { let k=2; while (seen[name+"_"+k]) k++; name = name+"_"+k; }
             seen[name] = true;
-            const blob = (f.n||"")+" "+(f.d||"")+" "+(f.b||"");
-            fields.push({
-              name,
-              label,
-              type: inferUiType(blob),
-              required: false,
-              note: [f.d, f.b].filter(Boolean).join(" \u2014 "),
-              group: "General",
-            });
+            fields.push({ name, label, type, required, note: note || "", group: group || "General" });
+          };
+          s.fns.forEach(f => {
+            const groupName = f.n || "General";
+            // Try to parse multiple fields out of the Business Rules / Notes column.
+            const extracted = parseFieldsFromBR(f.b);
+            if (extracted.length > 0) {
+              extracted.forEach(ef => pushField(ef.label, ef.type, ef.required, ef.note || f.d || "", groupName));
+            } else {
+              // Fallback: function row didn't describe individual fields → make one field from the function name.
+              const label = f.n || (f.d ? f.d.split(".")[0] : "Field");
+              const blob = (f.n||"")+" "+(f.d||"")+" "+(f.b||"");
+              pushField(label, inferUiType(blob), false, [f.d, f.b].filter(Boolean).join(" \u2014 "), groupName);
+            }
           });
-          const fieldGroups = fields.length
-            ? [{ section: "General", fieldNames: fields.map(f => f.name) }]
-            : [];
+          // Build fieldGroups from whatever groups actually appeared.
+          const groupOrder = [];
+          fields.forEach(f => { if (groupOrder.indexOf(f.group) < 0) groupOrder.push(f.group); });
+          const fieldGroups = groupOrder.map(g => ({
+            section: g,
+            fieldNames: fields.filter(f => f.group === g).map(f => f.name),
+          }));
           return {
             id:"s"+(i+1), name:s.name, icon:ic[i%ic.length], description:s.fns[0]?s.fns[0].d:"",
             reqIds:s.rids, actors:s.acts, actions:[], fields,
