@@ -91,6 +91,35 @@ export function subscribeData(callback) {
   });
 }
 
+// Extension → MIME fallback. Browsers sometimes leave file.type empty for .html,
+// .md, .csv, .log, etc., which causes Firebase Storage to serve them as binary
+// downloads. We resolve the type from the extension whenever the browser is silent.
+const EXT_MIME = {
+  html: "text/html", htm: "text/html",
+  txt: "text/plain", md: "text/markdown", log: "text/plain",
+  csv: "text/csv", tsv: "text/tab-separated-values",
+  json: "application/json", xml: "application/xml", yaml: "application/x-yaml", yml: "application/x-yaml",
+  js: "text/javascript", css: "text/css", svg: "image/svg+xml",
+  pdf: "application/pdf",
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp",
+  zip: "application/zip", "7z": "application/x-7z-compressed", rar: "application/vnd.rar",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+
+function resolveContentType(file) {
+  if (file && file.type) return file.type;
+  const name = String(file?.name || "");
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return "application/octet-stream";
+  const ext = name.slice(dot + 1).toLowerCase();
+  return EXT_MIME[ext] || "application/octet-stream";
+}
+
 /**
  * Upload an attachment file to Firebase Storage under a module folder.
  * @param {string} moduleId - The module identifier (used as folder)
@@ -103,12 +132,13 @@ export async function uploadAttachment(moduleId, file) {
   const safeName = String(file.name || "file").replace(/[^A-Za-z0-9._-]/g, "_");
   const path = `attachments/${safeModule}/${ts}_${safeName}`;
   const r = storageRef(storage, path);
-  await uploadBytes(r, file, { contentType: file.type || "application/octet-stream" });
+  const contentType = resolveContentType(file);
+  await uploadBytes(r, file, { contentType });
   const downloadURL = await getDownloadURL(r);
   return {
     name: file.name,
     size: file.size,
-    contentType: file.type || "application/octet-stream",
+    contentType,
     storagePath: path,
     downloadURL,
     uploadedAt: new Date().toISOString(),
