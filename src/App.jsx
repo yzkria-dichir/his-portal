@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { loadData, saveData, subscribeData, uploadAttachment, deleteAttachment } from "./firebase.js";
+import { loadData, saveData, subscribeData, uploadAttachment, deleteAttachment, updateAttachments } from "./firebase.js";
 
 // ━━━ PALETTE (DICHIR white + blue) ━━━
 const P = {
@@ -434,16 +434,28 @@ export default function HISDocPortal() {
   const deleteItem = (key, idx) => { const arr = [...(data[key][activeMod] || [])]; arr.splice(idx, 1); save({ ...data, [key]: { ...data[key], [activeMod]: arr } }); };
 
   // ━━━ ATTACHMENTS (Firebase Storage + versioning) ━━━
+  // Persist a new attachments list for the active module without re-saving the
+  // entire portal document. Updates local state + only the attachments.{mod} field.
+  const persistAttachments = async (nextList) => {
+    const newData = { ...data, attachments: { ...(data.attachments||{}), [activeMod]: nextList } };
+    setData(newData);
+    skipNextSync.current = true;
+    await updateAttachments(activeMod, nextList);
+  };
+
   const handleAttachmentsUpload = async (e) => {
     const files = Array.from(e.target.files || []); e.target.value = "";
     if (!files.length) return;
     setAttachUploading(true);
     try {
-      const existing = (data.attachments && data.attachments[activeMod]) || [];
-      const next = [...existing];
-      for (const file of files) {
-        const meta = await uploadAttachment(activeMod, file);
-        const nowIso = new Date().toISOString();
+      // Upload all files in parallel — Firebase Storage can handle concurrent uploads
+      // and the browser will pipeline them, so total time ≈ slowest single file.
+      const uploaded = await Promise.all(
+        files.map(async (file) => ({ file, meta: await uploadAttachment(activeMod, file) }))
+      );
+      const next = [...((data.attachments && data.attachments[activeMod]) || [])];
+      const nowIso = new Date().toISOString();
+      uploaded.forEach(({ file, meta }) => {
         const matchIdx = next.findIndex(a => a.name === file.name);
         if (matchIdx >= 0) {
           // Same filename → push as a new version of the existing attachment.
@@ -483,8 +495,8 @@ export default function HISDocPortal() {
             versions: [{ v: 1, size: meta.size, contentType: meta.contentType, storagePath: meta.storagePath, downloadURL: meta.downloadURL, uploadedAt: nowIso }],
           });
         }
-      }
-      await save({ ...data, attachments: { ...(data.attachments||{}), [activeMod]: next } });
+      });
+      await persistAttachments(next);
     } catch (err) {
       console.error("Attachment upload failed:", err);
       alert("⚠️ Upload failed: " + (err?.message || err));
@@ -498,11 +510,11 @@ export default function HISDocPortal() {
     const target = arr[idx];
     if (!target) return;
     try {
-      // Delete every version blob from Storage, then remove the metadata entry.
+      // Delete every version blob from Storage in parallel.
       const versions = Array.isArray(target.versions) && target.versions.length ? target.versions : [{ storagePath: target.storagePath }];
-      for (const v of versions) { if (v?.storagePath) await deleteAttachment(v.storagePath); }
+      await Promise.all(versions.map(v => v?.storagePath ? deleteAttachment(v.storagePath) : Promise.resolve()));
       arr.splice(idx, 1);
-      await save({ ...data, attachments: { ...(data.attachments||{}), [activeMod]: arr } });
+      await persistAttachments(arr);
     } catch (err) {
       console.error("Attachment delete failed:", err);
       alert("⚠️ Delete failed: " + (err?.message || err));
@@ -531,7 +543,7 @@ export default function HISDocPortal() {
         downloadURL: newest.downloadURL,
         updatedAt: newest.uploadedAt,
       } : { ...cur, versions: remaining };
-      await save({ ...data, attachments: { ...(data.attachments||{}), [activeMod]: arr } });
+      await persistAttachments(arr);
     } catch (err) {
       console.error("Version delete failed:", err);
       alert("⚠️ Delete failed: " + (err?.message || err));

@@ -26,7 +26,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot } from "firebase/firestore";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
 const firebaseConfig = {
@@ -113,6 +113,16 @@ export async function uploadAttachment(moduleId, file) {
     downloadURL,
     uploadedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * Persist only the attachments slot for a single module.
+ * Avoids re-serializing the entire portal document on every upload.
+ * @param {string} moduleId
+ * @param {Array} list - The full new attachments list for this module
+ */
+export async function updateAttachments(moduleId, list) {
+  await updateDoc(DOC_REF, { [`attachments.${moduleId}`]: list });
 }
 
 /**
