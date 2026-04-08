@@ -458,12 +458,66 @@ export default function HISDocPortal() {
           if (act && sMap[sn].acts.indexOf(act)<0) sMap[sn].acts.push(act);
           sMap[sn].fns.push({ n: String(r["Function Name"]||"").trim(), d: String(r["Description"]||"").trim(), b: String(r["Business Rules / Notes"]||"").trim() });
         });
+        // ─── Field Definitions sheet ───
+        // Columns: Screen | Group | Field Name | Label | Type | Required | Notes
+        const fldWs = wb.Sheets["Fields"] || wb.Sheets["Field Definitions"] || wb.Sheets["Field definitions"];
+        const fldRows = fldWs ? XL.utils.sheet_to_json(fldWs, { defval: "" }) : [];
+        const fMap = {}; // screenName -> { fields:[], groups:Set }
+        fldRows.forEach(r => {
+          const sn = String(r["Screen"]||"").trim();
+          const fn = String(r["Field Name"]||r["Field"]||"").trim();
+          if (!sn || !fn) return;
+          if (!fMap[sn]) fMap[sn] = { fields: [], groups: [] };
+          const grp = String(r["Group"]||r["Section"]||"").trim();
+          const reqStr = String(r["Required"]||"").trim().toLowerCase();
+          fMap[sn].fields.push({
+            name: fn,
+            label: String(r["Label"]||"").trim() || fn,
+            type: String(r["Type"]||"text").trim() || "text",
+            required: reqStr === "yes" || reqStr === "y" || reqStr === "true" || reqStr === "1",
+            note: String(r["Notes"]||r["Note"]||"").trim(),
+            group: grp,
+          });
+          if (grp && fMap[sn].groups.indexOf(grp) < 0) fMap[sn].groups.push(grp);
+        });
         const ic = ["\uD83D\uDCCB","\uD83D\uDD0D","\u2699\uFE0F","\uD83D\uDCCA","\u26A1","\uD83D\uDC65","\uD83D\uDC76","\u2753","\uD83D\uDCDD","\uD83D\uDCC5"];
-        const newScr = Object.values(sMap).map((s,i) => ({
-          id:"s"+(i+1), name:s.name, icon:ic[i%ic.length], description:s.fns[0]?s.fns[0].d:"",
-          reqIds:s.rids, actors:s.acts, actions:[], fields:[],
-          behavior:s.fns.map(f=>(f.n?f.n+": ":"")+f.b).filter(Boolean), apiEndpoints:[], fieldGroups:[],
-        }));
+        const newScr = Object.values(sMap).map((s,i) => {
+          const fEntry = fMap[s.name] || { fields: [], groups: [] };
+          const fieldGroups = fEntry.groups.map(g => ({
+            section: g,
+            fieldNames: fEntry.fields.filter(f => f.group === g).map(f => f.name),
+          }));
+          return {
+            id:"s"+(i+1), name:s.name, icon:ic[i%ic.length], description:s.fns[0]?s.fns[0].d:"",
+            reqIds:s.rids, actors:s.acts, actions:[], fields: fEntry.fields,
+            behavior:s.fns.map(f=>(f.n?f.n+": ":"")+f.b).filter(Boolean), apiEndpoints:[], fieldGroups,
+          };
+        });
+        // ─── Database Tables sheet ───
+        // Columns: Table | Table Description | Indices | Field | Type | Field Description | Constraints
+        const tblWs = wb.Sheets["Tables"] || wb.Sheets["Database Tables"] || wb.Sheets["DB Tables"];
+        const tblRows = tblWs ? XL.utils.sheet_to_json(tblWs, { defval: "" }) : [];
+        const tMap = {}; const tOrder = [];
+        tblRows.forEach(r => {
+          const tn = String(r["Table"]||r["Table Name"]||"").trim();
+          const fn = String(r["Field"]||r["Field Name"]||"").trim();
+          if (!tn) return;
+          if (!tMap[tn]) {
+            tMap[tn] = { name: tn, description: String(r["Table Description"]||r["Description"]||"").trim(), indices: [], fields: [] };
+            tOrder.push(tn);
+          }
+          const idx = String(r["Indices"]||r["Index"]||"").trim();
+          if (idx && tMap[tn].indices.indexOf(idx) < 0) tMap[tn].indices.push(idx);
+          if (fn) {
+            tMap[tn].fields.push({
+              field: fn,
+              type: String(r["Type"]||"VARCHAR").trim() || "VARCHAR",
+              desc: String(r["Field Description"]||r["Field Desc"]||r["Notes"]||"").trim(),
+              constraints: String(r["Constraints"]||"").trim(),
+            });
+          }
+        });
+        const newTbls = tOrder.map((tn,i) => ({ id: "c"+(i+1), ...tMap[tn] }));
         const repWs = wb.Sheets["Reports"]; const newReps = [];
         if (repWs) {
           const rng = XL.utils.decode_range(repWs["!ref"]||"A1");
@@ -478,10 +532,12 @@ export default function HISDocPortal() {
           screens:{...data.screens,[activeMod]:newScr.length?newScr:data.screens[activeMod]||[]},
           requirements:{...data.requirements,[activeMod]:newReqs.length?newReqs:data.requirements[activeMod]||[]},
           reports:{...data.reports,[activeMod]:newReps.length?newReps:data.reports[activeMod]||[]},
+          dbCollections:{...data.dbCollections,[activeMod]:newTbls.length?newTbls:data.dbCollections[activeMod]||[]},
           modules:data.modules.map(m=>m.id===activeMod?{...m,status:"documented",version:m.version==="\u2014"?"1.0":m.version}:m),
         });
         setActiveTab("screens");
-        alert("Imported "+mod.name+":\n"+newScr.length+" screens, "+newReqs.length+" requirements, "+newReps.length+" reports");
+        const totalFields = newScr.reduce((n,s)=>n+(s.fields?s.fields.length:0),0);
+        alert("Imported "+mod.name+":\n"+newScr.length+" screens, "+totalFields+" fields, "+newReqs.length+" requirements, "+newTbls.length+" tables, "+newReps.length+" reports");
         } catch(err) { alert("Import error: " + err.message); }
       };
       reader.readAsArrayBuffer(file);
@@ -493,6 +549,19 @@ export default function HISDocPortal() {
     w1["!cols"]=[{wch:14},{wch:24},{wch:50},{wch:20},{wch:10},{wch:50}];XL.utils.book_append_sheet(wb,w1,"Requirements");
     const w2=XL.utils.aoa_to_sheet([["Screen","Req ID","Function Name","Description","Actor","Priority","Business Rules / Notes"],["Screen","FR-XXX-001","Sample","System shall...","Clerk","High","Details"]]);
     w2["!cols"]=[{wch:22},{wch:14},{wch:24},{wch:50},{wch:20},{wch:10},{wch:50}];XL.utils.book_append_sheet(wb,w2,"Screens to function");
+    const wF=XL.utils.aoa_to_sheet([
+      ["Screen","Group","Field Name","Label","Type","Required","Notes"],
+      ["Screen","General","sample_field","Sample Field","text","Yes","Example field on this screen"],
+    ]);
+    wF["!cols"]=[{wch:22},{wch:20},{wch:22},{wch:22},{wch:14},{wch:10},{wch:40}];
+    XL.utils.book_append_sheet(wb,wF,"Fields");
+    const wT=XL.utils.aoa_to_sheet([
+      ["Table","Table Description","Indices","Field","Type","Field Description","Constraints"],
+      ["SAMPLE_TABLE","Sample table","ID (unique)","ID","VARCHAR","Primary key","PRIMARY KEY"],
+      ["SAMPLE_TABLE","","","Name","VARCHAR","Display name","NOT NULL"],
+    ]);
+    wT["!cols"]=[{wch:22},{wch:30},{wch:22},{wch:22},{wch:14},{wch:30},{wch:20}];
+    XL.utils.book_append_sheet(wb,wT,"Tables");
     const w3=XL.utils.aoa_to_sheet([["Report 1",null,"Report 2",null],["Filters","Columns","Filters","Columns"],["Date","Col1","Date","Col1"]]);
     w3["!cols"]=[{wch:30},{wch:24},{wch:30},{wch:24}];XL.utils.book_append_sheet(wb,w3,"Reports");
     const out=XL.write(wb,{bookType:"xlsx",type:"array"});
