@@ -1300,7 +1300,7 @@ export default function HISDocPortal() {
               </div>
               <div style={{ background: P.surface, border: `1px solid ${P.border}`, borderRadius: 10, overflow: "hidden" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead><tr><TH>ID</TH><TH>Function</TH><TH>Description</TH><TH>Actors</TH><TH>Business Rule</TH><TH>Priority</TH><TH>Screen</TH><TH></TH></tr></thead>
+                  <thead><tr><TH>ID</TH><TH>Function</TH><TH>Description</TH><TH>Actors</TH><TH>Business Rule</TH><TH>Priority</TH><TH></TH></tr></thead>
                   <tbody>{pgSlice(filteredReqs, pgReqs).map((r,i) => { const realIdx = reqs.indexOf(r); const actorsTxt = Array.isArray(r.actors) ? r.actors.join(", ") : (r.actors || ""); return (
                     <tr key={i} style={{ borderBottom: `1px solid ${P.border}15` }}>
                       <TD mono color="#A5F3FC" bold>{r.id}</TD>
@@ -1309,7 +1309,6 @@ export default function HISDocPortal() {
                       <TD color={P.textMuted}><div style={{ maxWidth: 160, whiteSpace: "normal", lineHeight: 1.4 }}>{actorsTxt}</div></TD>
                       <TD color={P.textMuted}><div style={{ maxWidth: 320, whiteSpace: "normal", lineHeight: 1.4 }}>{r.source || ""}</div></TD>
                       <TD><PriorityBadge p={r.priority} /></TD>
-                      <TD color={P.textMuted}>{r.screen}</TD>
                       <TD><div style={{ display: "flex", gap: 4 }}><Btn small ghost onClick={() => setModal({ type: "editReq", req: r, idx: realIdx })}>✎</Btn><Btn small danger ghost onClick={() => setConfirmDel({ what: r.id, onConfirm: () => { deleteItem("requirements", realIdx); setConfirmDel(null); } })}>×</Btn></div></TD>
                     </tr>
                   ); })}</tbody>
