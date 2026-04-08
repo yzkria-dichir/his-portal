@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { loadData, saveData, subscribeData } from "./firebase.js";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { loadData, saveData, subscribeData, uploadAttachment, deleteAttachment } from "./firebase.js";
 
 // ━━━ PALETTE (DICHIR white + blue) ━━━
 const P = {
@@ -261,6 +261,7 @@ const DEFAULT_DATA = {
       { id: "g5", title: "Managing Referrals", role: "Receptionist", steps: ["Open Referral Management Screen","View list of unbooked referrals","Filter by specialty, priority, or date","Click on referral to view order details","Click Book Appointment to schedule","Assign practitioner based on availability","Select clinic and location","Choose appointment date and time","System sends confirmation notification to patient","Referral status auto-updates to Booked","After encounter, referral marked as Completed"] },
     ],
   },
+  attachments: { mp: [], op: [], co: [] },
 };
 
 // Storage is now handled by Firebase (see firebase.js)
@@ -356,6 +357,7 @@ const TABS = [
   { id: "reports", label: "Reports", icon: "▤" },
   { id: "matrix", label: "Matrix", icon: "▦" },
   { id: "guides", label: "User Guide", icon: "◈" },
+  { id: "attachments", label: "Attachments", icon: "📎" },
 ];
 
 // ━━━ MAIN APP ━━━
@@ -378,6 +380,9 @@ export default function HISDocPortal() {
   const [pgGuideSteps, setPgGuideSteps] = useState(1);
   const [dbEngine, setDbEngine] = useState("PostgreSQL");
   const fileRef = useRef(null);
+  const attachRef = useRef(null);
+  const [attachUploading, setAttachUploading] = useState(false);
+  const [attachExpanded, setAttachExpanded] = useState({});
 
   // ━━━ FIREBASE STORAGE (Real-time sync) ━━━
   const skipNextSync = useRef(false);
@@ -415,17 +420,126 @@ export default function HISDocPortal() {
   const cols = data.dbCollections[activeMod] || [];
   const reps = data.reports[activeMod] || [];
   const guides = data.userGuides[activeMod] || [];
+  const attachments = (data.attachments && data.attachments[activeMod]) || [];
   const stats = { total: reqs.length, high: reqs.filter(r => r.priority === "High").length, med: reqs.filter(r => r.priority === "Medium").length, low: reqs.filter(r => r.priority === "Low").length };
   const filteredReqs = reqs.filter(r => { const ms = !search || r.id.toLowerCase().includes(search.toLowerCase()) || r.name.toLowerCase().includes(search.toLowerCase()); const mp = filterPri === "All" || r.priority === filterPri; return ms && mp; });
 
   // ━━━ CRUD HELPERS ━━━
   const updateModule = (id, updates) => { const nd = { ...data, modules: data.modules.map(m => m.id === id ? { ...m, ...updates } : m) }; save(nd); };
-  const addModule = (m) => { save({ ...data, modules: [...data.modules, m], screens: { ...data.screens, [m.id]: [] }, requirements: { ...data.requirements, [m.id]: [] }, dbCollections: { ...data.dbCollections, [m.id]: [] }, reports: { ...data.reports, [m.id]: [] }, userGuides: { ...data.userGuides, [m.id]: [] } }); };
-  const deleteModule = (id) => { const nd = { ...data, modules: data.modules.filter(m => m.id !== id) }; ["screens","requirements","dbCollections","reports","userGuides"].forEach(k => { nd[k] = { ...data[k] }; delete nd[k][id]; }); save(nd); if (activeMod === id) setActiveMod(nd.modules[0]?.id || ""); };
+  const addModule = (m) => { save({ ...data, modules: [...data.modules, m], screens: { ...data.screens, [m.id]: [] }, requirements: { ...data.requirements, [m.id]: [] }, dbCollections: { ...data.dbCollections, [m.id]: [] }, reports: { ...data.reports, [m.id]: [] }, userGuides: { ...data.userGuides, [m.id]: [] }, attachments: { ...(data.attachments||{}), [m.id]: [] } }); };
+  const deleteModule = (id) => { const nd = { ...data, modules: data.modules.filter(m => m.id !== id) }; ["screens","requirements","dbCollections","reports","userGuides","attachments"].forEach(k => { nd[k] = { ...(data[k]||{}) }; delete nd[k][id]; }); save(nd); if (activeMod === id) setActiveMod(nd.modules[0]?.id || ""); };
 
   const addItem = (key, item) => save({ ...data, [key]: { ...data[key], [activeMod]: [...(data[key][activeMod] || []), item] } });
   const updateItem = (key, idx, updates) => { const arr = [...(data[key][activeMod] || [])]; arr[idx] = { ...arr[idx], ...updates }; save({ ...data, [key]: { ...data[key], [activeMod]: arr } }); };
   const deleteItem = (key, idx) => { const arr = [...(data[key][activeMod] || [])]; arr.splice(idx, 1); save({ ...data, [key]: { ...data[key], [activeMod]: arr } }); };
+
+  // ━━━ ATTACHMENTS (Firebase Storage + versioning) ━━━
+  const handleAttachmentsUpload = async (e) => {
+    const files = Array.from(e.target.files || []); e.target.value = "";
+    if (!files.length) return;
+    setAttachUploading(true);
+    try {
+      const existing = (data.attachments && data.attachments[activeMod]) || [];
+      const next = [...existing];
+      for (const file of files) {
+        const meta = await uploadAttachment(activeMod, file);
+        const nowIso = new Date().toISOString();
+        const matchIdx = next.findIndex(a => a.name === file.name);
+        if (matchIdx >= 0) {
+          // Same filename → push as a new version of the existing attachment.
+          const cur = next[matchIdx];
+          const versions = Array.isArray(cur.versions) ? [...cur.versions] : [];
+          const nextVer = (cur.currentVersion || versions.length || 0) + 1;
+          versions.push({
+            v: nextVer,
+            size: meta.size,
+            contentType: meta.contentType,
+            storagePath: meta.storagePath,
+            downloadURL: meta.downloadURL,
+            uploadedAt: nowIso,
+          });
+          next[matchIdx] = {
+            ...cur,
+            currentVersion: nextVer,
+            size: meta.size,
+            contentType: meta.contentType,
+            storagePath: meta.storagePath,
+            downloadURL: meta.downloadURL,
+            updatedAt: nowIso,
+            versions,
+          };
+        } else {
+          // New attachment entry → version 1.
+          next.push({
+            id: "att_" + Date.now() + "_" + Math.random().toString(36).slice(2,7),
+            name: file.name,
+            currentVersion: 1,
+            size: meta.size,
+            contentType: meta.contentType,
+            storagePath: meta.storagePath,
+            downloadURL: meta.downloadURL,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+            versions: [{ v: 1, size: meta.size, contentType: meta.contentType, storagePath: meta.storagePath, downloadURL: meta.downloadURL, uploadedAt: nowIso }],
+          });
+        }
+      }
+      await save({ ...data, attachments: { ...(data.attachments||{}), [activeMod]: next } });
+    } catch (err) {
+      console.error("Attachment upload failed:", err);
+      alert("⚠️ Upload failed: " + (err?.message || err));
+    } finally {
+      setAttachUploading(false);
+    }
+  };
+
+  const handleAttachmentDelete = async (idx) => {
+    const arr = [...((data.attachments && data.attachments[activeMod]) || [])];
+    const target = arr[idx];
+    if (!target) return;
+    try {
+      // Delete every version blob from Storage, then remove the metadata entry.
+      const versions = Array.isArray(target.versions) && target.versions.length ? target.versions : [{ storagePath: target.storagePath }];
+      for (const v of versions) { if (v?.storagePath) await deleteAttachment(v.storagePath); }
+      arr.splice(idx, 1);
+      await save({ ...data, attachments: { ...(data.attachments||{}), [activeMod]: arr } });
+    } catch (err) {
+      console.error("Attachment delete failed:", err);
+      alert("⚠️ Delete failed: " + (err?.message || err));
+    }
+  };
+
+  const handleAttachmentVersionDelete = async (attIdx, versionV) => {
+    const arr = [...((data.attachments && data.attachments[activeMod]) || [])];
+    const cur = arr[attIdx];
+    if (!cur || !Array.isArray(cur.versions)) return;
+    if (cur.versions.length <= 1) { alert("Cannot delete the only version. Delete the whole attachment instead."); return; }
+    try {
+      const target = cur.versions.find(v => v.v === versionV);
+      if (target?.storagePath) await deleteAttachment(target.storagePath);
+      const remaining = cur.versions.filter(v => v.v !== versionV);
+      // If we deleted the current version, fall back to the highest remaining.
+      const wasCurrent = cur.currentVersion === versionV;
+      const newest = remaining.reduce((best, v) => (v.v > best.v ? v : best), remaining[0]);
+      arr[attIdx] = wasCurrent ? {
+        ...cur,
+        versions: remaining,
+        currentVersion: newest.v,
+        size: newest.size,
+        contentType: newest.contentType,
+        storagePath: newest.storagePath,
+        downloadURL: newest.downloadURL,
+        updatedAt: newest.uploadedAt,
+      } : { ...cur, versions: remaining };
+      await save({ ...data, attachments: { ...(data.attachments||{}), [activeMod]: arr } });
+    } catch (err) {
+      console.error("Version delete failed:", err);
+      alert("⚠️ Delete failed: " + (err?.message || err));
+    }
+  };
+
+  const fmtBytes = (b) => { if (!b && b !== 0) return ""; const u = ["B","KB","MB","GB"]; let i = 0, n = b; while (n >= 1024 && i < u.length-1) { n /= 1024; i++; } return n.toFixed(n>=10||i===0?0:1) + " " + u[i]; };
+  const fmtDate = (iso) => { if (!iso) return ""; try { const d = new Date(iso); return d.toLocaleString(); } catch { return iso; } };
 
   // ━━━ EXCEL IMPORT (using npm xlsx package) ━━━
   const getXL = (cb) => {
@@ -1467,6 +1581,89 @@ export default function HISDocPortal() {
                   ))}
                 </div>
               ); })()}
+            </div>
+          )}
+
+          {/* ATTACHMENTS */}
+          {activeTab === "attachments" && (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Attachments — {mod.name}</h1>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input ref={attachRef} type="file" multiple style={{ display: "none" }} onChange={handleAttachmentsUpload} />
+                  <Btn onClick={() => attachRef.current?.click()} color={P.green} disabled={attachUploading}>{attachUploading ? "Uploading…" : "+ Upload File(s)"}</Btn>
+                </div>
+              </div>
+              <p style={{ fontSize: 12, color: P.textMuted, margin: "0 0 14px" }}>
+                Upload any reference document (PDF, Word, Excel, image…) for this module. Re-uploading a file with the same name creates a new version automatically.
+              </p>
+              <div style={{ background: P.surface, border: `1px solid ${P.border}`, borderRadius: 10, overflow: "hidden" }}>
+                {attachments.length === 0 ? (
+                  <div style={{ padding: 32, textAlign: "center", color: P.textDim, fontSize: 13 }}>No attachments yet. Click "Upload File(s)" to add one.</div>
+                ) : (
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead><tr><TH>Name</TH><TH>Version</TH><TH>Size</TH><TH>Type</TH><TH>Last Updated</TH><TH></TH></tr></thead>
+                    <tbody>
+                      {attachments.map((a, i) => {
+                        const isOpen = !!attachExpanded[a.id];
+                        const versions = Array.isArray(a.versions) ? a.versions : [];
+                        return (
+                          <React.Fragment key={a.id || i}>
+                            <tr style={{ borderBottom: `1px solid ${P.border}15` }}>
+                              <TD bold>
+                                <a href={a.downloadURL} target="_blank" rel="noopener noreferrer" style={{ color: P.accent, textDecoration: "none" }}>{a.name}</a>
+                              </TD>
+                              <TD>
+                                <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: P.purpleDim, color: P.purple, fontFamily: "monospace" }}>v{a.currentVersion || 1}</span>
+                              </TD>
+                              <TD color={P.textMuted}>{fmtBytes(a.size)}</TD>
+                              <TD color={P.textMuted}>{a.contentType || ""}</TD>
+                              <TD color={P.textMuted}>{fmtDate(a.updatedAt || a.createdAt)}</TD>
+                              <TD>
+                                <div style={{ display: "flex", gap: 4 }}>
+                                  {versions.length > 1 && (
+                                    <Btn small ghost onClick={() => setAttachExpanded(s => ({ ...s, [a.id]: !s[a.id] }))}>{isOpen ? "▾ History" : "▸ History"}</Btn>
+                                  )}
+                                  <Btn small ghost onClick={() => window.open(a.downloadURL, "_blank")}>↓</Btn>
+                                  <Btn small danger ghost onClick={() => setConfirmDel({ what: a.name, onConfirm: async () => { await handleAttachmentDelete(i); setConfirmDel(null); } })}>×</Btn>
+                                </div>
+                              </TD>
+                            </tr>
+                            {isOpen && versions.length > 1 && (
+                              <tr style={{ background: P.bg }}>
+                                <td colSpan={6} style={{ padding: "10px 16px", borderBottom: `1px solid ${P.border}15` }}>
+                                  <div style={{ fontSize: 11, fontWeight: 700, color: P.accent, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 6 }}>Version History</div>
+                                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                    <thead><tr><TH>Version</TH><TH>Size</TH><TH>Uploaded At</TH><TH></TH></tr></thead>
+                                    <tbody>
+                                      {[...versions].sort((x,y) => y.v - x.v).map(v => (
+                                        <tr key={v.v} style={{ borderBottom: `1px solid ${P.border}10` }}>
+                                          <TD>
+                                            <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: v.v === a.currentVersion ? P.greenDim : P.surface, color: v.v === a.currentVersion ? P.green : P.textMuted, fontFamily: "monospace", border: `1px solid ${P.border}` }}>v{v.v}{v.v === a.currentVersion ? " (current)" : ""}</span>
+                                          </TD>
+                                          <TD color={P.textMuted}>{fmtBytes(v.size)}</TD>
+                                          <TD color={P.textMuted}>{fmtDate(v.uploadedAt)}</TD>
+                                          <TD>
+                                            <div style={{ display: "flex", gap: 4 }}>
+                                              <Btn small ghost onClick={() => window.open(v.downloadURL, "_blank")}>↓</Btn>
+                                              <Btn small danger ghost onClick={() => setConfirmDel({ what: a.name + " v" + v.v, onConfirm: async () => { await handleAttachmentVersionDelete(i, v.v); setConfirmDel(null); } })}>×</Btn>
+                                            </div>
+                                          </TD>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+                <div style={{ padding: "8px 12px", fontSize: 11, color: P.textDim, borderTop: `1px solid ${P.border}` }}>{attachments.length} attachment{attachments.length === 1 ? "" : "s"}</div>
+              </div>
             </div>
           )}
 
