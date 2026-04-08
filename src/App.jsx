@@ -510,6 +510,29 @@ export default function HISDocPortal() {
         const reqById = {};
         newReqs.forEach(r => { reqById[r.id] = r; });
 
+        // Try to pull a list of dropdown option values out of a hints string.
+        // Returns null if the hints don't look like an enumerated list.
+        const extractOptions = (hints) => {
+          if (!hints) return null;
+          let h = String(hints).replace(/\b(required|mandatory|optional)\b/ig, "").replace(/^[,;\s]+|[,;\s]+$/g, "").trim();
+          if (!h) return null;
+          // Drop common prefixes such as "enum:", "values:", "e.g."
+          h = h.replace(/^(enum|values?|options?|e\.?g\.?|i\.?e\.?)\s*[:\-]?\s*/i, "").trim();
+          let opts = null;
+          if (/[|\/]/.test(h)) {
+            opts = h.split(/\s*[|\/]\s*/).map(s => s.trim()).filter(Boolean);
+          } else if (h.includes(",")) {
+            const cs = h.split(",").map(s => s.trim()).filter(Boolean);
+            if (cs.length >= 2 && cs.every(c => c.length <= 30 && !/\b(max|min|chars?|characters?|bytes?|digits?|mb|kb|configurable|format)\b/i.test(c) && !/^\d+\s*(chars?|characters?|bytes?|digits?|mb|kb)/i.test(c))) {
+              opts = cs;
+            }
+          }
+          if (!opts || opts.length < 2) return null;
+          // Reject if any "option" still looks like a constraint/measurement
+          if (opts.some(o => /\d+\s*(chars?|characters?|bytes?|digits?|mb|kb)/i.test(o) || o.length > 30)) return null;
+          return opts;
+        };
+
         // Parse one item like "First Name (mandatory, max 50)" -> field object, or null.
         const parseFieldItem = (raw) => {
           if (!raw) return null;
@@ -521,6 +544,11 @@ export default function HISDocPortal() {
           let label = item, hints = "";
           const m = item.match(/^(.*?)\s*\(([^)]*)\)\s*\.?$/);
           if (m) { label = m[1].trim(); hints = m[2].trim(); }
+          // Also support "Label: Opt1 | Opt2 | Opt3" form (no parentheses)
+          if (!hints) {
+            const m2 = item.match(/^([^:]{1,60}):\s*(.+)$/);
+            if (m2 && /[|\/]/.test(m2[2])) { label = m2[1].trim(); hints = m2[2].trim(); }
+          }
           // Strip trailing punctuation
           label = label.replace(/[.;:]+$/, "").trim();
           // Required markers
@@ -534,12 +562,18 @@ export default function HISDocPortal() {
           if (/\b(shall|must|should|validates?|displays?|allows?|ensures?|when|after|before|if\s)\b/i.test(label)) return null;
           // Reject if label has no letters
           if (!/[A-Za-z]/.test(label)) return null;
-          return {
-            label,
-            type: inferUiType(label + " " + hints),
-            required,
-            note: hints,
-          };
+          // If hints describe an enumerated list of values → dropdown (or boolean for Yes/No)
+          const opts = extractOptions(hints);
+          let type, note;
+          if (opts) {
+            const yesNo = opts.length === 2 && opts.every(o => /^(yes|no|y|n|true|false)$/i.test(o));
+            type = yesNo ? "boolean" : "dropdown";
+            note = opts.join(" | ");
+          } else {
+            type = inferUiType(label + " " + hints);
+            note = hints;
+          }
+          return { label, type, required, note };
         };
         // Parse a Business Rules / Notes cell into multiple fields when it looks
         // like a list of fields. Returns [] when the cell is a free-form rule sentence.
