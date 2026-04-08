@@ -445,6 +445,7 @@ export default function HISDocPortal() {
           id: String(r["Req ID"]).trim(), name: String(r["Function Name"]||"").trim(),
           priority: String(r["Priority"]||"Medium").trim(), module: mod.name,
           description: String(r["Description"]||"").trim(), source: String(r["Business Rules / Notes"]||"").trim(),
+          actors: [], screen: "",
         }));
         const scrWs = wb.Sheets["Screens to function"] || wb.Sheets["Screens to Function"];
         const scrRows = scrWs ? XL.utils.sheet_to_json(scrWs, { defval: "" }) : [];
@@ -467,6 +468,21 @@ export default function HISDocPortal() {
           if (act && sMap[sn].acts.indexOf(act)<0) sMap[sn].acts.push(act);
           sMap[sn].fns.push({ n: fname, d: fdesc, b: fbr });
         });
+        // ─── Backfill requirement actors / screen from Screens-to-function sheet ───
+        const reqActors = {}; const reqScreen = {};
+        sOrder.forEach(sn => {
+          const s = sMap[sn];
+          s.rids.forEach(rid => {
+            if (!reqActors[rid]) reqActors[rid] = [];
+            s.acts.forEach(a => { if (reqActors[rid].indexOf(a) < 0) reqActors[rid].push(a); });
+            if (!reqScreen[rid]) reqScreen[rid] = sn;
+          });
+        });
+        newReqs.forEach(r => {
+          if (reqActors[r.id]) r.actors = reqActors[r.id];
+          if (reqScreen[r.id]) r.screen = reqScreen[r.id];
+        });
+
         // ─── Auto-derive fields & tables from Requirements + Screens to function ───
         const slug = (str) => String(str||"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"") || "field";
         const inferUiType = (txt) => {
@@ -700,7 +716,8 @@ export default function HISDocPortal() {
   };
 
   const ReqModal = ({ initial, idx, onClose }) => {
-    const [f, setF] = useState(initial || { id: "", name: "", priority: "High", screen: "" });
+    const [f, setF] = useState(initial || { id: "", name: "", priority: "High", screen: "", description: "", source: "", actors: [] });
+    const [actorText, setActorText] = useState(Array.isArray(initial?.actors) ? initial.actors.join(", ") : (initial?.actors || ""));
     return (
       <Modal title={initial ? "Edit Requirement" : "Add Requirement"} onClose={onClose}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -708,10 +725,13 @@ export default function HISDocPortal() {
           <FormRow label="Priority"><Select value={f.priority} onChange={v => setF({ ...f, priority: v })} options={["High","Medium","Low"]} /></FormRow>
         </div>
         <FormRow label="Function Name"><Input value={f.name} onChange={v => setF({ ...f, name: v })} /></FormRow>
+        <FormRow label="Description"><Input area value={f.description || ""} onChange={v => setF({ ...f, description: v })} /></FormRow>
+        <FormRow label="Actors (comma-sep)"><Input value={actorText} onChange={setActorText} placeholder="Clerk, Nurse, Physician" /></FormRow>
+        <FormRow label="Business Rule"><Input area value={f.source || ""} onChange={v => setF({ ...f, source: v })} /></FormRow>
         <FormRow label="Screen"><Input value={f.screen} onChange={v => setF({ ...f, screen: v })} /></FormRow>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
           <Btn ghost onClick={onClose}>Cancel</Btn>
-          <Btn onClick={() => { idx != null ? updateItem("requirements", idx, f) : addItem("requirements", f); onClose(); }}>Save</Btn>
+          <Btn onClick={() => { const payload = { ...f, actors: actorText.split(",").map(s => s.trim()).filter(Boolean) }; idx != null ? updateItem("requirements", idx, payload) : addItem("requirements", payload); onClose(); }}>Save</Btn>
         </div>
       </Modal>
     );
@@ -1280,10 +1300,16 @@ export default function HISDocPortal() {
               </div>
               <div style={{ background: P.surface, border: `1px solid ${P.border}`, borderRadius: 10, overflow: "hidden" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead><tr><TH>ID</TH><TH>Function</TH><TH>Priority</TH><TH>Screen</TH><TH></TH></tr></thead>
-                  <tbody>{pgSlice(filteredReqs, pgReqs).map((r,i) => { const realIdx = reqs.indexOf(r); return (
+                  <thead><tr><TH>ID</TH><TH>Function</TH><TH>Description</TH><TH>Actors</TH><TH>Business Rule</TH><TH>Priority</TH><TH>Screen</TH><TH></TH></tr></thead>
+                  <tbody>{pgSlice(filteredReqs, pgReqs).map((r,i) => { const realIdx = reqs.indexOf(r); const actorsTxt = Array.isArray(r.actors) ? r.actors.join(", ") : (r.actors || ""); return (
                     <tr key={i} style={{ borderBottom: `1px solid ${P.border}15` }}>
-                      <TD mono color="#A5F3FC" bold>{r.id}</TD><TD bold>{r.name}</TD><TD><PriorityBadge p={r.priority} /></TD><TD color={P.textMuted}>{r.screen}</TD>
+                      <TD mono color="#A5F3FC" bold>{r.id}</TD>
+                      <TD bold>{r.name}</TD>
+                      <TD color={P.textMuted}><div style={{ maxWidth: 280, whiteSpace: "normal", lineHeight: 1.4 }}>{r.description || ""}</div></TD>
+                      <TD color={P.textMuted}><div style={{ maxWidth: 160, whiteSpace: "normal", lineHeight: 1.4 }}>{actorsTxt}</div></TD>
+                      <TD color={P.textMuted}><div style={{ maxWidth: 320, whiteSpace: "normal", lineHeight: 1.4 }}>{r.source || ""}</div></TD>
+                      <TD><PriorityBadge p={r.priority} /></TD>
+                      <TD color={P.textMuted}>{r.screen}</TD>
                       <TD><div style={{ display: "flex", gap: 4 }}><Btn small ghost onClick={() => setModal({ type: "editReq", req: r, idx: realIdx })}>✎</Btn><Btn small danger ghost onClick={() => setConfirmDel({ what: r.id, onConfirm: () => { deleteItem("requirements", realIdx); setConfirmDel(null); } })}>×</Btn></div></TD>
                     </tr>
                   ); })}</tbody>
