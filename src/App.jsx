@@ -448,15 +448,24 @@ export default function HISDocPortal() {
         }));
         const scrWs = wb.Sheets["Screens to function"] || wb.Sheets["Screens to Function"];
         const scrRows = scrWs ? XL.utils.sheet_to_json(scrWs, { defval: "" }) : [];
-        const sMap = {};
+        const sMap = {}; const sOrder = [];
+        let curScreen = ""; // forward-fill for merged "Screen" cells
         scrRows.forEach(r => {
-          const sn = String(r["Screen"]||"").trim(); if (!sn) return;
-          if (!sMap[sn]) sMap[sn] = { name: sn, rids: [], acts: [], fns: [] };
+          const cell = String(r["Screen"]||"").trim();
+          if (cell) curScreen = cell;
+          const sn = curScreen;
+          // Skip rows with no screen context AND no function content
+          const fname = String(r["Function Name"]||"").trim();
+          const fdesc = String(r["Description"]||"").trim();
+          const fbr = String(r["Business Rules / Notes"]||"").trim();
+          if (!sn) return;
+          if (!fname && !fdesc && !fbr && !String(r["Req ID"]||"").trim()) return;
+          if (!sMap[sn]) { sMap[sn] = { name: sn, rids: [], acts: [], fns: [] }; sOrder.push(sn); }
           const rid = String(r["Req ID"]||"").trim();
           if (rid && sMap[sn].rids.indexOf(rid)<0) sMap[sn].rids.push(rid);
           const act = String(r["Actor"]||"").trim();
           if (act && sMap[sn].acts.indexOf(act)<0) sMap[sn].acts.push(act);
-          sMap[sn].fns.push({ n: String(r["Function Name"]||"").trim(), d: String(r["Description"]||"").trim(), b: String(r["Business Rules / Notes"]||"").trim() });
+          sMap[sn].fns.push({ n: fname, d: fdesc, b: fbr });
         });
         // ─── Auto-derive fields & tables from Requirements + Screens to function ───
         const slug = (str) => String(str||"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"") || "field";
@@ -486,7 +495,7 @@ export default function HISDocPortal() {
         newReqs.forEach(r => { reqById[r.id] = r; });
 
         const ic = ["\uD83D\uDCCB","\uD83D\uDD0D","\u2699\uFE0F","\uD83D\uDCCA","\u26A1","\uD83D\uDC65","\uD83D\uDC76","\u2753","\uD83D\uDCDD","\uD83D\uDCC5"];
-        const newScr = Object.values(sMap).map((s,i) => {
+        const newScr = sOrder.map(n => sMap[n]).map((s,i) => {
           // Generate one field per function listed for this screen.
           const seen = {};
           const fields = [];
