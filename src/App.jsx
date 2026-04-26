@@ -374,6 +374,7 @@ export default function HISDocPortal() {
   const [pgReqs, setPgReqs] = useState(1);
   const [pgFields, setPgFields] = useState(1);
   const [pgDbFields, setPgDbFields] = useState(1);
+  const [dbFieldSort, setDbFieldSort] = useState({ key: null, dir: "asc" });
   const [pgBehavior, setPgBehavior] = useState(1);
   const [pgReps, setPgReps] = useState(1);
   const [pgApi, setPgApi] = useState(1);
@@ -1186,6 +1187,29 @@ export default function HISDocPortal() {
 
   // ━━━ TABLE HELPER ━━━
   const TH = ({ children }) => <th style={{ textAlign: "left", padding: "8px 10px", color: P.textDim, fontWeight: 700, fontSize: 10, textTransform: "uppercase", borderBottom: `2px solid ${P.border}`, background: "#F8FAFC" }}>{children}</th>;
+  const SortTH = ({ children, sortKey, sort, setSort }) => {
+    const active = sort.key === sortKey;
+    const arrow = active ? (sort.dir === "asc" ? " ↑" : " ↓") : " ↕";
+    return (
+      <th
+        onClick={() => setSort(s => s.key === sortKey ? (s.dir === "asc" ? { key: sortKey, dir: "desc" } : { key: null, dir: "asc" }) : { key: sortKey, dir: "asc" })}
+        style={{ textAlign: "left", padding: "8px 10px", color: active ? P.green : P.textDim, fontWeight: 700, fontSize: 10, textTransform: "uppercase", borderBottom: `2px solid ${P.border}`, background: "#F8FAFC", cursor: "pointer", userSelect: "none" }}
+      >
+        {children}<span style={{ opacity: active ? 1 : 0.4, fontSize: 9, marginLeft: 2 }}>{arrow}</span>
+      </th>
+    );
+  };
+  const sortRows = (arr, sort) => {
+    if (!sort.key) return arr;
+    const dir = sort.dir === "asc" ? 1 : -1;
+    return [...arr].sort((a, b) => {
+      const av = (a?.[sort.key] ?? "").toString().toLowerCase();
+      const bv = (b?.[sort.key] ?? "").toString().toLowerCase();
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+  };
   const TD = ({ children, mono, bold, color: c, style: sx }) => <td style={{ padding: "7px 10px", fontFamily: mono ? "'JetBrains Mono', monospace" : "inherit", fontSize: mono ? 11.5 : 12.5, fontWeight: bold ? 700 : 400, color: c || P.text, ...sx }}>{children}</td>;
 
   const deleteFieldFromScreen = (sIdx, fIdx) => { const sc = [...screens]; const s = { ...sc[sIdx] }; const flds = [...(s.fields||[])]; flds.splice(fIdx, 1); s.fields = flds; sc[sIdx] = s; save({ ...data, screens: { ...data.screens, [activeMod]: sc } }); };
@@ -1226,7 +1250,7 @@ export default function HISDocPortal() {
           </div>
           <div style={{ display: "flex", height: 44 }}>
             {TABS.map(t => (
-              <button key={t.id} onClick={() => { setActiveTab(t.id); setActiveIdx(0); setPgReqs(1); setPgFields(1); setPgDbFields(1); setPgBehavior(1); setPgReps(1); setPgApi(1); setPgGuideSteps(1); }} style={{ padding: "0 14px", border: "none", borderBottom: activeTab===t.id?`2px solid ${mod.color}`:"2px solid transparent", background: "none", color: activeTab===t.id?P.text:P.textDim, cursor: "pointer", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
+              <button key={t.id} onClick={() => { setActiveTab(t.id); setActiveIdx(0); setPgReqs(1); setPgFields(1); setPgDbFields(1); setPgBehavior(1); setPgReps(1); setPgApi(1); setPgGuideSteps(1); setDbFieldSort({ key: null, dir: "asc" }); }} style={{ padding: "0 14px", border: "none", borderBottom: activeTab===t.id?`2px solid ${mod.color}`:"2px solid transparent", background: "none", color: activeTab===t.id?P.text:P.textDim, cursor: "pointer", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
                 <span style={{ fontSize: 10, opacity: 0.6 }}>{t.icon}</span>{t.label}
               </button>
             ))}
@@ -1443,7 +1467,7 @@ export default function HISDocPortal() {
                 </div>
               </div>
               <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-                {cols.map((c,i) => <button key={i} onClick={() => { setActiveIdx(i); setPgDbFields(1); }} style={{ padding: "6px 12px", borderRadius: 6, border: `1px solid ${activeIdx===i?P.green:P.border}`, background: activeIdx===i?P.greenDim:"transparent", color: activeIdx===i?P.green:P.textMuted, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "monospace" }}>{c.name}</button>)}
+                {cols.map((c,i) => <button key={i} onClick={() => { setActiveIdx(i); setPgDbFields(1); setDbFieldSort({ key: null, dir: "asc" }); }} style={{ padding: "6px 12px", borderRadius: 6, border: `1px solid ${activeIdx===i?P.green:P.border}`, background: activeIdx===i?P.greenDim:"transparent", color: activeIdx===i?P.green:P.textMuted, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "monospace" }}>{c.name}</button>)}
               </div>
               {cols[activeIdx] && (() => { const col = cols[activeIdx]; return (
                 <div style={{ background: P.surface, border: `1px solid ${P.border}`, borderRadius: 10, padding: 22 }}>
@@ -1454,8 +1478,15 @@ export default function HISDocPortal() {
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>{col.indices?.map((idx,i) => <span key={i} style={{ padding: "3px 9px", borderRadius: 5, fontSize: 11, background: P.amberDim, color: P.amber, fontFamily: "monospace" }}>{idx}</span>)}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 10, fontWeight: 800, color: P.accent, textTransform: "uppercase", letterSpacing: "1px" }}>Schema</span><Btn small onClick={() => setModal({ type: "addDbField", colIdx: activeIdx })} color={P.green}>+ Add Field</Btn></div>
                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead><tr><TH>Column Name</TH><TH>Data Type</TH><TH>Description</TH><TH>Constraints</TH><TH>Screen</TH><TH></TH></tr></thead>
-                    <tbody>{pgSlice(col.fields||[], pgDbFields).map((f,fi) => { const rfi = (col.fields||[]).indexOf(f); return (
+                    <thead><tr>
+                      <SortTH sortKey="field" sort={dbFieldSort} setSort={setDbFieldSort}>Column Name</SortTH>
+                      <SortTH sortKey="type" sort={dbFieldSort} setSort={setDbFieldSort}>Data Type</SortTH>
+                      <SortTH sortKey="desc" sort={dbFieldSort} setSort={setDbFieldSort}>Description</SortTH>
+                      <SortTH sortKey="constraints" sort={dbFieldSort} setSort={setDbFieldSort}>Constraints</SortTH>
+                      <SortTH sortKey="screen" sort={dbFieldSort} setSort={setDbFieldSort}>Screen</SortTH>
+                      <TH></TH>
+                    </tr></thead>
+                    <tbody>{pgSlice(sortRows(col.fields||[], dbFieldSort), pgDbFields).map((f,fi) => { const rfi = (col.fields||[]).indexOf(f); return (
                       <tr key={fi} style={{ borderBottom: "1px solid "+P.border+"12" }}>
                         <TD mono color="#1565C0">{f.field}</TD>
                         <TD><span style={{ padding: "1px 6px", borderRadius: 4, background: P.border, fontSize: 10, fontFamily: "monospace" }}>{f.type}</span></TD>
