@@ -1305,6 +1305,20 @@ export default function HISDocPortal() {
               {screens[activeIdx] && (() => { const sc = screens[activeIdx]; const groups = sc.fieldGroups || []; const hasGroups = groups.length > 0;
                 const groupedFields = hasGroups ? groups.map(g => ({ section: g.section, fields: (sc.fields||[]).filter(f => g.fieldNames.includes(f.name)) })) : [{ section: null, fields: sc.fields || [] }];
                 const ungroupedFields = hasGroups ? (sc.fields||[]).filter(f => !groups.some(g => g.fieldNames.includes(f.name))) : [];
+                const renameGroup = (oldName) => {
+                  const current = oldName === "Ungrouped" ? "" : oldName;
+                  const input = window.prompt("Rename group" + (oldName === "Ungrouped" ? " (assign a name to ungrouped fields)" : ""), current);
+                  if (input === null) return;
+                  const next = input.trim();
+                  if (next === current) return;
+                  const s2 = [...screens]; const s = { ...s2[activeIdx] };
+                  s.fields = (s.fields || []).map(f => ((f.group || "") === current ? { ...f, group: next } : f));
+                  if (Array.isArray(s.fieldGroups) && oldName !== "Ungrouped") {
+                    s.fieldGroups = s.fieldGroups.map(g => g.section === oldName ? { ...g, section: next } : g);
+                  }
+                  s2[activeIdx] = s;
+                  save({ ...data, screens: { ...data.screens, [activeMod]: s2 } });
+                };
                 const addBehavior = (text) => { const s2 = [...screens]; const s = { ...s2[activeIdx] }; s.behavior = [...(s.behavior||[]), text]; s2[activeIdx] = s; save({ ...data, screens: { ...data.screens, [activeMod]: s2 } }); };
                 const editBehavior = (bi, text) => { const s2 = [...screens]; const s = { ...s2[activeIdx] }; const b = [...(s.behavior||[])]; b[bi] = text; s.behavior = b; s2[activeIdx] = s; save({ ...data, screens: { ...data.screens, [activeMod]: s2 } }); };
                 const deleteBehavior = (bi) => { const s2 = [...screens]; const s = { ...s2[activeIdx] }; const b = [...(s.behavior||[])]; b.splice(bi,1); s.behavior = b; s2[activeIdx] = s; save({ ...data, screens: { ...data.screens, [activeMod]: s2 } }); };
@@ -1347,8 +1361,9 @@ export default function HISDocPortal() {
                           <div style={{ color: "#5BA7E6", fontWeight: 700, fontSize: 13 }}>{sc.name}:</div>
                           {Object.entries(grp).map(([gName, fields], gi) => (
                             <div key={gi}>
-                              <div style={{ display: "flex", alignItems: "center", paddingLeft: 28 }}>
+                              <div style={{ display: "flex", alignItems: "center", paddingLeft: 28, gap: 6 }}>
                                 <span style={{ color: "#80CBC4", fontWeight: 700, flex: 1 }}>{gName}:</span>
+                                <button onClick={() => renameGroup(gName)} title="Rename group" style={{ background: "none", border: "1px solid #80CBC455", color: "#80CBC4", cursor: "pointer", fontSize: 10, padding: "1px 8px", borderRadius: 4, opacity: 0.7, fontFamily: "inherit" }}>{"✎"} Rename</button>
                                 <button onClick={() => setModal({ type: "addField", screenIdx: activeIdx, defaultGroup: gName === "Ungrouped" ? "" : gName })} style={{ background: "none", border: "1px solid #80CBC455", color: "#80CBC4", cursor: "pointer", fontSize: 10, padding: "1px 8px", borderRadius: 4, opacity: 0.7, fontFamily: "inherit" }}>+ Add</button>
                               </div>
                               {fields.map((f, fi) => (
