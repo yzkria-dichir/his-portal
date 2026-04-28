@@ -384,6 +384,7 @@ export default function HISDocPortal() {
   const fileRef = useRef(null);
   const attachRef = useRef(null);
   const [attachUploading, setAttachUploading] = useState(false);
+  const [attachProgress, setAttachProgress] = useState({ done: 0, total: 0, current: "", percent: 0 });
   const [attachExpanded, setAttachExpanded] = useState({});
 
   // ━━━ FIREBASE STORAGE (Real-time sync) ━━━
@@ -428,6 +429,15 @@ export default function HISDocPortal() {
 
   // ━━━ CRUD HELPERS ━━━
   const updateModule = (id, updates) => { const nd = { ...data, modules: data.modules.map(m => m.id === id ? { ...m, ...updates } : m) }; save(nd); };
+  const moveModule = (id, dir) => {
+    const idx = data.modules.findIndex(m => m.id === id);
+    if (idx < 0) return;
+    const ti = idx + dir;
+    if (ti < 0 || ti >= data.modules.length) return;
+    const arr = [...data.modules];
+    [arr[idx], arr[ti]] = [arr[ti], arr[idx]];
+    save({ ...data, modules: arr });
+  };
   const addModule = (m) => { save({ ...data, modules: [...data.modules, m], screens: { ...data.screens, [m.id]: [] }, requirements: { ...data.requirements, [m.id]: [] }, dbCollections: { ...data.dbCollections, [m.id]: [] }, reports: { ...data.reports, [m.id]: [] }, userGuides: { ...data.userGuides, [m.id]: [] }, attachments: { ...(data.attachments||{}), [m.id]: [] } }); };
   const deleteModule = (id) => { const nd = { ...data, modules: data.modules.filter(m => m.id !== id) }; ["screens","requirements","dbCollections","reports","userGuides","attachments"].forEach(k => { nd[k] = { ...(data[k]||{}) }; delete nd[k][id]; }); save(nd); if (activeMod === id) setActiveMod(nd.modules[0]?.id || ""); };
 
@@ -449,12 +459,19 @@ export default function HISDocPortal() {
     const files = Array.from(e.target.files || []); e.target.value = "";
     if (!files.length) return;
     setAttachUploading(true);
+    setAttachProgress({ done: 0, total: files.length, current: files[0]?.name || "", percent: 0 });
     try {
-      // Upload all files in parallel — Firebase Storage can handle concurrent uploads
-      // and the browser will pipeline them, so total time ≈ slowest single file.
-      const uploaded = await Promise.all(
-        files.map(async (file) => ({ file, meta: await uploadAttachment(activeMod, file) }))
-      );
+      // Upload sequentially so we can show clear per-file progress and avoid
+      // overwhelming Storage with parallel large uploads (which can stall/fail).
+      const uploaded = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setAttachProgress({ done: i, total: files.length, current: file.name, percent: 0 });
+        const meta = await uploadAttachment(activeMod, file, (p) => {
+          setAttachProgress({ done: i, total: files.length, current: file.name, percent: p });
+        });
+        uploaded.push({ file, meta });
+      }
       const next = [...((data.attachments && data.attachments[activeMod]) || [])];
       const nowIso = new Date().toISOString();
       uploaded.forEach(({ file, meta }) => {
@@ -501,9 +518,12 @@ export default function HISDocPortal() {
       await persistAttachments(next);
     } catch (err) {
       console.error("Attachment upload failed:", err);
-      alert("⚠️ Upload failed: " + (err?.message || err));
+      const code = err?.code ? `\nCode: ${err.code}` : "";
+      const serverMsg = err?.serverResponse ? `\nServer: ${err.serverResponse}` : "";
+      alert("⚠️ Upload failed: " + (err?.message || err) + code + serverMsg);
     } finally {
       setAttachUploading(false);
+      setAttachProgress({ done: 0, total: 0, current: "", percent: 0 });
     }
   };
 
@@ -1255,12 +1275,21 @@ export default function HISDocPortal() {
         </div>
         <div style={{ padding: "8px 6px", flex: 1 }}>
           {!collapsed && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 8px", marginBottom: 6 }}><span style={{ fontSize: 9, fontWeight: 800, letterSpacing: "2px", color: "#5BA7E6", textTransform: "uppercase" }}>Modules</span><Btn small onClick={() => setModal({ type: "addModule" })} color={P.green}>+ Add</Btn></div>}
-          {data.modules.map(m => (
-            <button key={m.id} onClick={() => { setActiveMod(m.id); setActiveTab(m.status==="pending"?"overview":"overview"); setActiveIdx(0); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: collapsed?0:8, padding: collapsed?"8px 0":"7px 10px", borderRadius: 7, border: "none", cursor: "pointer", fontSize: 12, fontWeight: activeMod===m.id?700:500, background: activeMod===m.id?"#1B75BB25":"transparent", color: activeMod===m.id?"#FFFFFF":"#8896AB", transition: "all 0.15s", marginBottom: 1, textAlign: "left", justifyContent: collapsed?"center":"flex-start" }}>
+          {data.modules.map((m, mi) => {
+            const isFirst = mi === 0;
+            const isLast = mi === data.modules.length - 1;
+            return (
+            <div key={m.id} onClick={() => { setActiveMod(m.id); setActiveTab(m.status==="pending"?"overview":"overview"); setActiveIdx(0); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: collapsed?0:6, padding: collapsed?"8px 0":"7px 10px", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: activeMod===m.id?700:500, background: activeMod===m.id?"#1B75BB25":"transparent", color: activeMod===m.id?"#FFFFFF":"#8896AB", transition: "all 0.15s", marginBottom: 1, justifyContent: collapsed?"center":"flex-start" }}>
               <span style={{ fontSize: collapsed?16:14 }}>{m.icon}</span>
-              {!collapsed && <><span style={{ flex: 1 }}>{m.shortName}</span><span style={{ width: 6, height: 6, borderRadius: "50%", background: m.status==="documented"?P.green:P.textDim, flexShrink: 0 }} /></>}
-            </button>
-          ))}
+              {!collapsed && <>
+                <span style={{ flex: 1 }}>{m.shortName}</span>
+                <button disabled={isFirst} onClick={(e) => { e.stopPropagation(); moveModule(m.id, -1); }} title="Move up" style={{ background: "none", border: "none", color: "#4ADE80", cursor: isFirst ? "default" : "pointer", fontSize: 13, fontWeight: 700, padding: "0 2px", opacity: isFirst ? 0.25 : 1, lineHeight: 1 }}>{"↑"}</button>
+                <button disabled={isLast} onClick={(e) => { e.stopPropagation(); moveModule(m.id, 1); }} title="Move down" style={{ background: "none", border: "none", color: "#60A5FA", cursor: isLast ? "default" : "pointer", fontSize: 13, fontWeight: 700, padding: "0 2px", opacity: isLast ? 0.25 : 1, lineHeight: 1 }}>{"↓"}</button>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: m.status==="documented"?P.green:P.textDim, flexShrink: 0 }} />
+              </>}
+            </div>
+            );
+          })}
         </div>
         {!collapsed && <div style={{ padding: "10px 14px", borderTop: "1px solid #1B3A5C", fontSize: 10, color: "#5BA7E6" }}><Btn small danger ghost onClick={resetAll} style={{ width: "100%", justifyContent: "center" }}>Reset to Default</Btn><div style={{ fontSize: 9, color: "#5BA7E6", marginTop: 6 }}>© 2026 DICHIR</div></div>}
       </aside>
@@ -1735,7 +1764,8 @@ export default function HISDocPortal() {
                 <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Attachments — {mod.name}</h1>
                 <div style={{ display: "flex", gap: 8 }}>
                   <input ref={attachRef} type="file" multiple style={{ display: "none" }} onChange={handleAttachmentsUpload} />
-                  <Btn onClick={() => attachRef.current?.click()} color={P.green} disabled={attachUploading}>{attachUploading ? "Uploading…" : "+ Upload File(s)"}</Btn>
+                  <Btn onClick={() => attachRef.current?.click()} color={P.green} disabled={attachUploading}>{attachUploading ? `Uploading ${Math.min(attachProgress.done + 1, attachProgress.total)}/${attachProgress.total} · ${Math.round(attachProgress.percent * 100)}%` : "+ Upload File(s)"}</Btn>
+                  {attachUploading && attachProgress.current && <div style={{ fontSize: 11, color: P.textMuted, marginLeft: 4 }}>{attachProgress.current}</div>}
                 </div>
               </div>
               <p style={{ fontSize: 12, color: P.textMuted, margin: "0 0 14px" }}>

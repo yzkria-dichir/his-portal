@@ -27,7 +27,7 @@
 
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot } from "firebase/firestore";
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: "AIzaSyB5yqYu1BTz80TYwWMJWfPgEfsY4LCemn4",
@@ -126,14 +126,25 @@ function resolveContentType(file) {
  * @param {File} file - The file to upload
  * @returns {Promise<{name:string,size:number,contentType:string,storagePath:string,downloadURL:string,uploadedAt:string}>}
  */
-export async function uploadAttachment(moduleId, file) {
+export async function uploadAttachment(moduleId, file, onProgress) {
   const safeModule = String(moduleId || "misc").replace(/[^A-Za-z0-9_-]/g, "_");
   const ts = Date.now();
   const safeName = String(file.name || "file").replace(/[^A-Za-z0-9._-]/g, "_");
   const path = `attachments/${safeModule}/${ts}_${safeName}`;
   const r = storageRef(storage, path);
   const contentType = resolveContentType(file);
-  await uploadBytes(r, file, { contentType });
+  const task = uploadBytesResumable(r, file, { contentType });
+  await new Promise((resolve, reject) => {
+    task.on("state_changed",
+      (snap) => {
+        if (typeof onProgress === "function" && snap.totalBytes > 0) {
+          onProgress(snap.bytesTransferred / snap.totalBytes);
+        }
+      },
+      (err) => reject(err),
+      () => resolve()
+    );
+  });
   const downloadURL = await getDownloadURL(r);
   return {
     name: file.name,
