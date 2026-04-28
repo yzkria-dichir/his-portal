@@ -375,6 +375,7 @@ export default function HISDocPortal() {
   const [pgFields, setPgFields] = useState(1);
   const [pgDbFields, setPgDbFields] = useState(1);
   const [dbFieldSort, setDbFieldSort] = useState({ key: null, dir: "asc" });
+  const [collapsedGroups, setCollapsedGroups] = useState({});
   const [pgBehavior, setPgBehavior] = useState(1);
   const [pgReps, setPgReps] = useState(1);
   const [pgApi, setPgApi] = useState(1);
@@ -1334,6 +1335,35 @@ export default function HISDocPortal() {
                 const groupedFields = hasGroups ? groups.map(g => ({ section: g.section, fields: (sc.fields||[]).filter(f => g.fieldNames.includes(f.name)) })) : [{ section: null, fields: sc.fields || [] }];
                 const ungroupedFields = hasGroups ? (sc.fields||[]).filter(f => !groups.some(g => g.fieldNames.includes(f.name))) : [];
                 const renameGroup = (oldName) => setModal({ type: "renameGroup", screenIdx: activeIdx, oldName });
+                const moveGroup = (groupName, dir) => {
+                  const target = groupName === "Ungrouped" ? "" : groupName;
+                  const s2 = [...screens]; const s = { ...s2[activeIdx] };
+                  const fields = s.fields || [];
+                  const order = [];
+                  fields.forEach(f => { const g = f.group || ""; if (order.indexOf(g) < 0) order.push(g); });
+                  const idx = order.indexOf(target);
+                  if (idx < 0) return;
+                  const ti = idx + dir;
+                  if (ti < 0 || ti >= order.length) return;
+                  [order[idx], order[ti]] = [order[ti], order[idx]];
+                  const grouped = {};
+                  fields.forEach(f => { const g = f.group || ""; if (!grouped[g]) grouped[g] = []; grouped[g].push(f); });
+                  s.fields = order.flatMap(g => grouped[g] || []);
+                  if (Array.isArray(s.fieldGroups)) {
+                    const fgByName = {};
+                    s.fieldGroups.forEach(fg => { fgByName[fg.section] = fg; });
+                    const reordered = order.filter(g => g !== "" && fgByName[g]).map(g => fgByName[g]);
+                    const leftover = s.fieldGroups.filter(fg => order.indexOf(fg.section) < 0);
+                    s.fieldGroups = [...reordered, ...leftover];
+                  }
+                  s2[activeIdx] = s;
+                  save({ ...data, screens: { ...data.screens, [activeMod]: s2 } });
+                };
+                const toggleGroupCollapsed = (gName) => {
+                  const key = `${activeMod}:${activeIdx}:${gName}`;
+                  setCollapsedGroups(prev => ({ ...prev, [key]: !prev[key] }));
+                };
+                const isGroupCollapsed = (gName) => !!collapsedGroups[`${activeMod}:${activeIdx}:${gName}`];
                 const moveFieldInGroup = (fromIdx, dir) => {
                   const s2 = [...screens]; const s = { ...s2[activeIdx] };
                   const fields = [...(s.fields || [])];
@@ -1390,13 +1420,23 @@ export default function HISDocPortal() {
                       return (
                         <div style={{ background: "#0B1B35", borderRadius: 8, padding: 20, fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: 12, lineHeight: 2, overflowX: "auto" }}>
                           <div style={{ color: "#5BA7E6", fontWeight: 700, fontSize: 13 }}>{sc.name}:</div>
-                          {Object.entries(grp).map(([gName, fields], gi) => (
+                          {(() => {
+                            const groupKeys = Object.keys(grp);
+                            return Object.entries(grp).map(([gName, fields], gi) => {
+                            const isFirstGroup = gi === 0;
+                            const isLastGroup = gi === groupKeys.length - 1;
+                            const collapsed = isGroupCollapsed(gName);
+                            return (
                             <div key={gi}>
                               <div style={{ display: "flex", alignItems: "center", paddingLeft: 28, gap: 6 }}>
-                                <span style={{ color: "#80CBC4", fontWeight: 700, flex: 1 }}>{gName}:</span>
+                                <button onClick={() => toggleGroupCollapsed(gName)} title={collapsed ? "Expand" : "Collapse"} style={{ background: "none", border: "none", color: "#80CBC4", cursor: "pointer", fontSize: 12, padding: "0 4px", fontFamily: "inherit", lineHeight: 1 }}>{collapsed ? "▸" : "▾"}</button>
+                                <span onClick={() => toggleGroupCollapsed(gName)} style={{ color: "#80CBC4", fontWeight: 700, flex: 1, cursor: "pointer", userSelect: "none" }}>{gName}: <span style={{ color: "#546E7A", fontWeight: 400, fontSize: 10 }}>({fields.length})</span></span>
+                                <button disabled={isFirstGroup} onClick={() => moveGroup(gName, -1)} title="Move group up" style={{ background: "none", border: "1px solid #80CBC455", color: "#80CBC4", cursor: isFirstGroup ? "default" : "pointer", fontSize: 11, padding: "1px 8px", borderRadius: 4, opacity: isFirstGroup ? 0.25 : 0.7, fontFamily: "inherit" }}>{"↑"}</button>
+                                <button disabled={isLastGroup} onClick={() => moveGroup(gName, 1)} title="Move group down" style={{ background: "none", border: "1px solid #80CBC455", color: "#80CBC4", cursor: isLastGroup ? "default" : "pointer", fontSize: 11, padding: "1px 8px", borderRadius: 4, opacity: isLastGroup ? 0.25 : 0.7, fontFamily: "inherit" }}>{"↓"}</button>
                                 <button onClick={() => renameGroup(gName)} title="Rename group" style={{ background: "none", border: "1px solid #80CBC455", color: "#80CBC4", cursor: "pointer", fontSize: 10, padding: "1px 8px", borderRadius: 4, opacity: 0.7, fontFamily: "inherit" }}>{"✎"} Rename</button>
                                 <button onClick={() => setModal({ type: "addField", screenIdx: activeIdx, defaultGroup: gName === "Ungrouped" ? "" : gName })} style={{ background: "none", border: "1px solid #80CBC455", color: "#80CBC4", cursor: "pointer", fontSize: 10, padding: "1px 8px", borderRadius: 4, opacity: 0.7, fontFamily: "inherit" }}>+ Add</button>
                               </div>
+                              {!collapsed && (<>
                               {fields.map((f, fi) => {
                                 const isFirst = fi === 0;
                                 const isLast = fi === fields.length - 1;
@@ -1416,8 +1456,11 @@ export default function HISDocPortal() {
                                 </div>
                                 );
                               })}
+                              </>)}
                             </div>
-                          ))}
+                            );
+                            });
+                          })()}
                         </div>
                       );
                     })()}

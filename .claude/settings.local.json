@@ -8,7 +8,9 @@
       "Bash(awk 'NR==1408 {print length\\($0\\) - length\\(gensub\\(/^[[:space:]]+/, \"\", 1, $0\\)\\)}' \"e:/ClinicaCheck/Portal/files/his-portal/his-portal/src/App.jsx\")",
       "Bash(awk 'NR==1408' \"e:/ClinicaCheck/Portal/files/his-portal/his-portal/src/App.jsx\")",
       "Read(//tmp/**)",
-      "Bash(python \"e:/ClinicaCheck/Portal/files/his-portal/his-portal/.tmp_replace.py\")"
+      "Bash(python \"e:/ClinicaCheck/Portal/files/his-portal/his-portal/.tmp_replace.py\")",
+      "Bash(grep -c '\\\\\\\\u270E' \"e:/ClinicaCheck/Portal/files/his-portal/his-portal/src/App.jsx\")",
+      "Bash(grep -c '\\\\\\\\u2191' \"e:/ClinicaCheck/Portal/files/his-portal/his-portal/src/App.jsx\")"
     ]
   }
 }
