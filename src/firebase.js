@@ -134,15 +134,43 @@ export async function uploadAttachment(moduleId, file, onProgress) {
   const r = storageRef(storage, path);
   const contentType = resolveContentType(file);
   const task = uploadBytesResumable(r, file, { contentType });
+
+  // Detect uploads that are silently stuck (most often: CORS denying the
+  // request, or Storage rules blocking writes without a proper error). If
+  // the bytesTransferred counter doesn't advance for STALL_MS, abort with a
+  // diagnostic so the UI can show something actionable.
+  const STALL_MS = 30000;
+  let lastBytes = -1;
+  let stallTimer = null;
+  const armStallTimer = (reject) => {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => {
+      try { task.cancel(); } catch {}
+      const err = new Error(
+        "Upload stalled — no bytes transferred for " + (STALL_MS / 1000) +
+        "s. This usually means the Storage bucket's CORS is not configured " +
+        "for this origin, or Storage rules are blocking writes. Check the " +
+        "browser DevTools Network tab for a failed/blocked request."
+      );
+      err.code = "storage/stalled";
+      reject(err);
+    }, STALL_MS);
+  };
+
   await new Promise((resolve, reject) => {
+    armStallTimer(reject);
     task.on("state_changed",
       (snap) => {
+        if (snap.bytesTransferred !== lastBytes) {
+          lastBytes = snap.bytesTransferred;
+          armStallTimer(reject);
+        }
         if (typeof onProgress === "function" && snap.totalBytes > 0) {
           onProgress(snap.bytesTransferred / snap.totalBytes);
         }
       },
-      (err) => reject(err),
-      () => resolve()
+      (err) => { if (stallTimer) clearTimeout(stallTimer); reject(err); },
+      () => { if (stallTimer) clearTimeout(stallTimer); resolve(); }
     );
   });
   const downloadURL = await getDownloadURL(r);
