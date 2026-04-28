@@ -1331,9 +1331,7 @@ export default function HISDocPortal() {
                   return <button key={i} onClick={() => { setActiveIdx(i); setPgFields(1); setPgBehavior(1); }} style={{ padding: "6px 12px", borderRadius: 6, border: `1px solid ${activeIdx===i?mod.color:isDisabled?P.red+"66":P.border}`, background: activeIdx===i?mod.color+"18":isDisabled?P.redDim:"transparent", color: activeIdx===i?mod.color:isDisabled?P.red:P.textMuted, cursor: "pointer", fontSize: 12, fontWeight: 600, opacity: isDisabled ? 0.7 : 1 }}>{s.icon} {s.name}{isDisabled ? " ⊘" : ""}</button>;
                 })}
               </div>
-              {screens[activeIdx] && (() => { const sc = screens[activeIdx]; const groups = sc.fieldGroups || []; const hasGroups = groups.length > 0;
-                const groupedFields = hasGroups ? groups.map(g => ({ section: g.section, fields: (sc.fields||[]).filter(f => g.fieldNames.includes(f.name)) })) : [{ section: null, fields: sc.fields || [] }];
-                const ungroupedFields = hasGroups ? (sc.fields||[]).filter(f => !groups.some(g => g.fieldNames.includes(f.name))) : [];
+              {screens[activeIdx] && (() => { const sc = screens[activeIdx];
                 const renameGroup = (oldName) => setModal({ type: "renameGroup", screenIdx: activeIdx, oldName });
                 const moveGroup = (groupName, dir) => {
                   const target = groupName === "Ungrouped" ? "" : groupName;
@@ -1468,46 +1466,54 @@ export default function HISDocPortal() {
                   {/* Fields with Grouping */}
                   <div style={{ background: P.surface, border: `1px solid ${P.border}`, borderRadius: 10, padding: 20, marginBottom: 14 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}><div style={{ display: "flex", gap: 8, alignItems: "center" }}><Badge text="Fields" color={P.amber} /><span style={{ fontSize: 13, fontWeight: 600 }}>Field Definitions</span></div><Btn small onClick={() => setModal({ type: "addField", screenIdx: activeIdx })} color={P.green}>+ Add</Btn></div>
-                    {(sc.fields||[]).length === 0 ? <p style={{ color: P.textDim, fontSize: 12, fontStyle: "italic" }}>No fields defined yet.</p> : (
-                      <>
-                        {groupedFields.map((g, gi) => (
+                    {(sc.fields||[]).length === 0 ? <p style={{ color: P.textDim, fontSize: 12, fontStyle: "italic" }}>No fields defined yet.</p> : (() => {
+                      const defGrp = {};
+                      (sc.fields||[]).forEach((f, fi) => { const g = f.group || "Ungrouped"; if (!defGrp[g]) defGrp[g] = []; defGrp[g].push({ ...f, _idx: fi }); });
+                      const defKeys = Object.keys(defGrp);
+                      return defKeys.map((gName, gi) => {
+                        const fields = defGrp[gName];
+                        const isFirstGroup = gi === 0;
+                        const isLastGroup = gi === defKeys.length - 1;
+                        const collapsed = isGroupCollapsed("def:" + gName);
+                        return (
                           <div key={gi} style={{ marginBottom: 16 }}>
-                            {g.section && <div style={{ fontSize: 11, fontWeight: 700, color: mod.color, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px", paddingBottom: 4, borderBottom: `1px solid ${P.border}` }}>{g.section}</div>}
-                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                              {gi === 0 && <thead><tr><TH>Field</TH><TH>Label</TH><TH>Type</TH><TH>Req</TH><TH>Group</TH><TH>Table</TH><TH>Notes</TH><TH></TH></tr></thead>}
-                              <tbody>{g.fields.map((f,fi) => { const realIdx = (sc.fields||[]).indexOf(f); return (
-                                <tr key={fi} style={{ borderBottom: `1px solid ${P.border}15` }}>
-                                  <TD mono color="#1565C0">{f.name}</TD><TD bold>{f.label}</TD>
-                                  <TD><span style={{ padding: "1px 6px", borderRadius: 4, background: P.border, fontSize: 10, fontFamily: "monospace" }}>{f.type}</span></TD>
-                                  <TD color={f.required ? P.red : P.textDim}>{f.required ? "*" : "—"}</TD>
-                                  <TD>{f.group ? <span style={{ padding: "1px 7px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: P.purpleDim, color: P.purple, fontFamily: "monospace" }}>{f.group}</span> : <span style={{ color: P.textDim, fontSize: 11 }}>—</span>}</TD>
-                                  <TD><span style={{ padding: "1px 7px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: P.greenDim, color: P.green, fontFamily: "monospace" }}>{f.targetTable || "MP_patients"}</span></TD>
-                                  <TD color={P.textMuted}>{f.note}</TD>
-                                  <TD><div style={{ display: "flex", gap: 4 }}><Btn small ghost onClick={() => setModal({ type: "editField", screenIdx: activeIdx, fieldIdx: realIdx, field: f })}>✎</Btn><Btn small danger ghost onClick={() => deleteFieldFromScreen(activeIdx, realIdx)}>✕</Btn></div></TD>
-                                </tr>
-                              ); })}</tbody>
-                            </table>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, paddingBottom: 4, borderBottom: `1px solid ${P.border}` }}>
+                              <button onClick={() => toggleGroupCollapsed("def:" + gName)} title={collapsed ? "Expand" : "Collapse"} style={{ background: "none", border: "none", color: mod.color, cursor: "pointer", fontSize: 13, padding: "0 4px", lineHeight: 1 }}>{collapsed ? "\u25B8" : "\u25BE"}</button>
+                              <span onClick={() => toggleGroupCollapsed("def:" + gName)} style={{ fontSize: 11, fontWeight: 700, color: mod.color, textTransform: "uppercase", letterSpacing: "0.5px", flex: 1, cursor: "pointer", userSelect: "none" }}>{gName} <span style={{ color: P.textDim, fontWeight: 400 }}>({fields.length})</span></span>
+                              <button disabled={isFirstGroup} onClick={() => moveGroup(gName, -1)} title="Move group up" style={{ background: "none", border: `1px solid ${P.border}`, color: mod.color, cursor: isFirstGroup ? "default" : "pointer", fontSize: 11, padding: "1px 8px", borderRadius: 4, opacity: isFirstGroup ? 0.3 : 0.85 }}>{"\u2191"}</button>
+                              <button disabled={isLastGroup} onClick={() => moveGroup(gName, 1)} title="Move group down" style={{ background: "none", border: `1px solid ${P.border}`, color: mod.color, cursor: isLastGroup ? "default" : "pointer", fontSize: 11, padding: "1px 8px", borderRadius: 4, opacity: isLastGroup ? 0.3 : 0.85 }}>{"\u2193"}</button>
+                              <button onClick={() => renameGroup(gName)} title="Rename group" style={{ background: "none", border: `1px solid ${P.border}`, color: mod.color, cursor: "pointer", fontSize: 10, padding: "1px 8px", borderRadius: 4, opacity: 0.85 }}>{"\u270E"} Rename</button>
+                              <button onClick={() => setModal({ type: "addField", screenIdx: activeIdx, defaultGroup: gName === "Ungrouped" ? "" : gName })} style={{ background: "none", border: `1px solid ${P.border}`, color: P.green, cursor: "pointer", fontSize: 10, padding: "1px 8px", borderRadius: 4, opacity: 0.85 }}>+ Add</button>
+                            </div>
+                            {!collapsed && (
+                              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                <thead><tr><TH>Field</TH><TH>Label</TH><TH>Type</TH><TH>Req</TH><TH>Group</TH><TH>Table</TH><TH>Notes</TH><TH></TH></tr></thead>
+                                <tbody>{fields.map((f, fi) => {
+                                  const isFirst = fi === 0;
+                                  const isLast = fi === fields.length - 1;
+                                  return (
+                                  <tr key={fi} style={{ borderBottom: `1px solid ${P.border}15` }}>
+                                    <TD mono color="#1565C0">{f.name}</TD><TD bold>{f.label}</TD>
+                                    <TD><span style={{ padding: "1px 6px", borderRadius: 4, background: P.border, fontSize: 10, fontFamily: "monospace" }}>{f.type}</span></TD>
+                                    <TD color={f.required ? P.red : P.textDim}>{f.required ? "*" : "\u2014"}</TD>
+                                    <TD>{f.group ? <span style={{ padding: "1px 7px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: P.purpleDim, color: P.purple, fontFamily: "monospace" }}>{f.group}</span> : <span style={{ color: P.textDim, fontSize: 11 }}>{"\u2014"}</span>}</TD>
+                                    <TD><span style={{ padding: "1px 7px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: P.greenDim, color: P.green, fontFamily: "monospace" }}>{f.targetTable || "MP_patients"}</span></TD>
+                                    <TD color={P.textMuted}>{f.note}</TD>
+                                    <TD><div style={{ display: "flex", gap: 4 }}>
+                                      <button disabled={isFirst} onClick={() => moveFieldInGroup(f._idx, -1)} title="Move up" style={{ background: "transparent", border: `1px solid ${P.border}`, borderRadius: 6, color: P.text, cursor: isFirst ? "default" : "pointer", fontSize: 11, padding: "2px 6px", opacity: isFirst ? 0.25 : 0.85 }}>{"\u2191"}</button>
+                                      <button disabled={isLast} onClick={() => moveFieldInGroup(f._idx, 1)} title="Move down" style={{ background: "transparent", border: `1px solid ${P.border}`, borderRadius: 6, color: P.text, cursor: isLast ? "default" : "pointer", fontSize: 11, padding: "2px 6px", opacity: isLast ? 0.25 : 0.85 }}>{"\u2193"}</button>
+                                      <Btn small ghost onClick={() => setModal({ type: "editField", screenIdx: activeIdx, fieldIdx: f._idx, field: sc.fields[f._idx] })}>{"\u270E"}</Btn>
+                                      <Btn small danger ghost onClick={() => deleteFieldFromScreen(activeIdx, f._idx)}>{"\u2715"}</Btn>
+                                    </div></TD>
+                                  </tr>
+                                  );
+                                })}</tbody>
+                              </table>
+                            )}
                           </div>
-                        ))}
-                        {ungroupedFields.length > 0 && (
-                          <div style={{ marginBottom: 16 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: P.textDim, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>Other Fields</div>
-                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                              <tbody>{ungroupedFields.map((f,fi) => { const realIdx = (sc.fields||[]).indexOf(f); return (
-                                <tr key={fi} style={{ borderBottom: `1px solid ${P.border}15` }}>
-                                  <TD mono color="#1565C0">{f.name}</TD><TD bold>{f.label}</TD>
-                                  <TD><span style={{ padding: "1px 6px", borderRadius: 4, background: P.border, fontSize: 10, fontFamily: "monospace" }}>{f.type}</span></TD>
-                                  <TD color={f.required ? P.red : P.textDim}>{f.required ? "*" : "—"}</TD>
-                                  <TD><span style={{ padding: "1px 7px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: P.greenDim, color: P.green, fontFamily: "monospace" }}>{f.targetTable || "MP_patients"}</span></TD>
-                                  <TD color={P.textMuted}>{f.note}</TD>
-                                  <TD><div style={{ display: "flex", gap: 4 }}><Btn small ghost onClick={() => setModal({ type: "editField", screenIdx: activeIdx, fieldIdx: realIdx, field: f })}>✎</Btn><Btn small danger ghost onClick={() => deleteFieldFromScreen(activeIdx, realIdx)}>✕</Btn></div></TD>
-                                </tr>
-                              ); })}</tbody>
-                            </table>
-                          </div>
-                        )}
-                      </>
-                    )}
+                        );
+                      });
+                    })()}
                   </div>
                   {/* Behavior - Interactive */}
                   <div style={{ background: P.surface, border: `1px solid ${P.border}`, borderRadius: 10, padding: 20, marginBottom: 14 }}>
