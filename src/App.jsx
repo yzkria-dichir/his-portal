@@ -1334,6 +1334,22 @@ export default function HISDocPortal() {
                 const groupedFields = hasGroups ? groups.map(g => ({ section: g.section, fields: (sc.fields||[]).filter(f => g.fieldNames.includes(f.name)) })) : [{ section: null, fields: sc.fields || [] }];
                 const ungroupedFields = hasGroups ? (sc.fields||[]).filter(f => !groups.some(g => g.fieldNames.includes(f.name))) : [];
                 const renameGroup = (oldName) => setModal({ type: "renameGroup", screenIdx: activeIdx, oldName });
+                const moveFieldInGroup = (fromIdx, dir) => {
+                  const s2 = [...screens]; const s = { ...s2[activeIdx] };
+                  const fields = [...(s.fields || [])];
+                  const cur = fields[fromIdx];
+                  if (!cur) return;
+                  const g = cur.group || "";
+                  let target = -1;
+                  for (let i = fromIdx + dir; i >= 0 && i < fields.length; i += dir) {
+                    if ((fields[i].group || "") === g) { target = i; break; }
+                  }
+                  if (target < 0) return;
+                  [fields[fromIdx], fields[target]] = [fields[target], fields[fromIdx]];
+                  s.fields = fields;
+                  s2[activeIdx] = s;
+                  save({ ...data, screens: { ...data.screens, [activeMod]: s2 } });
+                };
                 const addBehavior = (text) => { const s2 = [...screens]; const s = { ...s2[activeIdx] }; s.behavior = [...(s.behavior||[]), text]; s2[activeIdx] = s; save({ ...data, screens: { ...data.screens, [activeMod]: s2 } }); };
                 const editBehavior = (bi, text) => { const s2 = [...screens]; const s = { ...s2[activeIdx] }; const b = [...(s.behavior||[])]; b[bi] = text; s.behavior = b; s2[activeIdx] = s; save({ ...data, screens: { ...data.screens, [activeMod]: s2 } }); };
                 const deleteBehavior = (bi) => { const s2 = [...screens]; const s = { ...s2[activeIdx] }; const b = [...(s.behavior||[])]; b.splice(bi,1); s.behavior = b; s2[activeIdx] = s; save({ ...data, screens: { ...data.screens, [activeMod]: s2 } }); };
@@ -1381,7 +1397,10 @@ export default function HISDocPortal() {
                                 <button onClick={() => renameGroup(gName)} title="Rename group" style={{ background: "none", border: "1px solid #80CBC455", color: "#80CBC4", cursor: "pointer", fontSize: 10, padding: "1px 8px", borderRadius: 4, opacity: 0.7, fontFamily: "inherit" }}>{"✎"} Rename</button>
                                 <button onClick={() => setModal({ type: "addField", screenIdx: activeIdx, defaultGroup: gName === "Ungrouped" ? "" : gName })} style={{ background: "none", border: "1px solid #80CBC455", color: "#80CBC4", cursor: "pointer", fontSize: 10, padding: "1px 8px", borderRadius: 4, opacity: 0.7, fontFamily: "inherit" }}>+ Add</button>
                               </div>
-                              {fields.map((f, fi) => (
+                              {fields.map((f, fi) => {
+                                const isFirst = fi === 0;
+                                const isLast = fi === fields.length - 1;
+                                return (
                                 <div key={fi} style={{ display: "flex", alignItems: "center", paddingLeft: 56, color: "#E0E0E0" }}>
                                   <span style={{ minWidth: 180, whiteSpace: "nowrap" }}>{f.label || f.name}</span>
                                   <span style={{ color: "#546E7A", margin: "0 6px" }}>:</span>
@@ -1389,11 +1408,14 @@ export default function HISDocPortal() {
                                   {f.note && <span style={{ color: "#78909C", whiteSpace: "nowrap" }}>{" | "}{f.note}</span>}
                                   {f.required && <span style={{ color: "#EF5350", marginLeft: 4 }}>*</span>}
                                   <span style={{ marginLeft: "auto", display: "flex", gap: 2, flexShrink: 0 }}>
+                                    <button disabled={isFirst} onClick={() => moveFieldInGroup(f._idx, -1)} title="Move up" style={{ background: "none", border: "none", color: "#80CBC4", cursor: isFirst ? "default" : "pointer", fontSize: 12, padding: "0 4px", opacity: isFirst ? 0.2 : 0.6 }}>{"\u2191"}</button>
+                                    <button disabled={isLast} onClick={() => moveFieldInGroup(f._idx, 1)} title="Move down" style={{ background: "none", border: "none", color: "#80CBC4", cursor: isLast ? "default" : "pointer", fontSize: 12, padding: "0 4px", opacity: isLast ? 0.2 : 0.6 }}>{"\u2193"}</button>
                                     <button onClick={() => setModal({ type: "editField", screenIdx: activeIdx, fieldIdx: f._idx, field: sc.fields[f._idx] })} style={{ background: "none", border: "none", color: "#5BA7E6", cursor: "pointer", fontSize: 11, padding: "0 4px", opacity: 0.6 }}>{"\u270E"}</button>
                                     <button onClick={() => deleteFieldFromScreen(activeIdx, f._idx)} style={{ background: "none", border: "none", color: "#EF5350", cursor: "pointer", fontSize: 11, padding: "0 4px", opacity: 0.6 }}>{"\u2715"}</button>
                                   </span>
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           ))}
                         </div>
